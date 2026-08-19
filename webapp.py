@@ -287,6 +287,9 @@ REVIEW_STYLE = """
   .action-param input[type=text], .action-param select { width: 100%; padding: 10px 12px;
     border: 1px solid var(--line); border-radius: 10px; font-family: inherit; font-size: 0.92rem;
     background: #fff; color: var(--text); }
+  .preview-box { margin: 10px 0 0; padding: 14px 16px; background: var(--cyan-tint);
+    border: 1px solid var(--line); border-radius: 10px; font-family: monospace; font-size: 0.82rem;
+    white-space: pre-wrap; word-break: break-word; color: var(--text); max-height: 260px; overflow-y: auto; }
 
   .result-icon { font-size: 1.6rem; }
   .next-link { display: block; text-align: center; margin-top: 16px; color: var(--navy); font-weight: 600;
@@ -558,6 +561,11 @@ REVIEW_PAGE = """
       </div>
 
       <div class="actions-row">
+        <button type="button" class="btn btn-ghost" id="preview-btn" disabled>Preview what will be sent</button>
+      </div>
+      <pre id="preview-box" class="preview-box" style="display:none;"></pre>
+
+      <div class="actions-row">
         <button type="button" class="btn btn-ghost" id="back-btn">Back</button>
         <button type="button" class="btn btn-primary" id="run-btn" disabled>Choose an option above</button>
       </div>
@@ -634,6 +642,8 @@ REVIEW_PAGE = """
                         archive: document.getElementById('param-archive'),
                         download: null };
   const runBtn = document.getElementById('run-btn');
+  const previewBtn = document.getElementById('preview-btn');
+  const previewBox = document.getElementById('preview-box');
 
   document.querySelectorAll('.action-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -644,6 +654,8 @@ REVIEW_PAGE = """
       if (paramBoxes[selectedAction]) paramBoxes[selectedAction].style.display = 'block';
       runBtn.disabled = false;
       runBtn.textContent = selectedAction === 'download' ? 'Get the spreadsheet' : 'Run automation';
+      previewBtn.disabled = false;
+      previewBox.style.display = 'none';
     });
   });
 
@@ -705,7 +717,37 @@ REVIEW_PAGE = """
       });
   }
 
+  function previewAutomation() {
+    if (!selectedAction) return;
+    const errBox = document.getElementById('automate-error');
+    errBox.innerHTML = '';
+    previewBtn.disabled = true;
+    previewBtn.textContent = 'Loading…';
+    fetch('/preview/' + token, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({ fields: collectFields(), action: selectedAction }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        previewBtn.disabled = false;
+        previewBtn.textContent = 'Preview what will be sent';
+        if (!data.ok) {
+          errBox.innerHTML = '<div class="notice notice-error">' + data.message + '</div>';
+          return;
+        }
+        previewBox.textContent = data.preview;
+        previewBox.style.display = 'block';
+      })
+      .catch(() => {
+        previewBtn.disabled = false;
+        previewBtn.textContent = 'Preview what will be sent';
+        errBox.innerHTML = '<div class="notice notice-error">Something went wrong. Please try again.</div>';
+      });
+  }
+
   runBtn?.addEventListener('click', () => { if (selectedAction) runAutomation(selectedAction); });
+  previewBtn?.addEventListener('click', previewAutomation);
   document.getElementById('discard-btn')?.addEventListener('click', () => runAutomation('discard'));
 </script>
 </body>
@@ -866,6 +908,48 @@ def review(token):
     )
 
 
+def _parse_rows(data):
+    return [
+        {"label": (r.get("label") or "").strip(), "value": (r.get("value") or "").strip()}
+        for r in data.get("fields", [])
+        if (r.get("label") or "").strip()
+    ]
+
+
+@app.route("/preview/<token>", methods=["POST"])
+@limiter.limit("30 per minute")
+def preview(token):
+    """Shows exactly what a chosen action would send or produce, without
+    actually sending or producing it — no webhook POST, no email, no file
+    move. Lets someone setting up a Zap/Scenario see real field names
+    before they build anything around them, addressed directly at "no
+    self-serve integration story": pasting a webhook URL only gets you so
+    far if you can't see what's coming out the other end."""
+    record = _PENDING.get(token)
+    if record is None:
+        return jsonify(ok=False, message="This review session has expired."), 404
+
+    data = request.get_json(silent=True) or {}
+    rows = _parse_rows(data)
+    action = data.get("action")
+
+    if action == "webhook":
+        payload = {row["label"]: row["value"] for row in rows}
+        payload["_document"] = record["original_filename"]
+        payload["_type"] = record["type"]
+        return jsonify(ok=True, preview=json.dumps(payload, indent=2))
+    if action == "email":
+        subject = f"{record['type'] or 'Document'} details: {record['original_filename']}"
+        body = "\n".join(f"{r['label']}: {r['value'] or 'Not provided'}" for r in rows)
+        return jsonify(ok=True, preview=f"Subject: {subject}\n\n{body}")
+    if action == "archive":
+        filename = automation.build_archive_filename(rows, record["original_filename"])
+        return jsonify(ok=True, preview=f"Would be saved as:\n{filename}")
+    if action == "download":
+        return jsonify(ok=True, preview="Generates an Excel file with the fields below, one row.")
+    return jsonify(ok=False, message="Choose an option above first."), 400
+
+
 @app.route("/automate/<token>", methods=["POST"])
 @limiter.limit("20 per minute")
 def automate(token):
@@ -874,11 +958,7 @@ def automate(token):
         return jsonify(ok=False, message="This review session has expired."), 404
 
     data = request.get_json(silent=True) or {}
-    rows = [
-        {"label": (r.get("label") or "").strip(), "value": (r.get("value") or "").strip()}
-        for r in data.get("fields", [])
-        if (r.get("label") or "").strip()
-    ]
+    rows = _parse_rows(data)
     action = data.get("action")
     param = (data.get("param") or "").strip()
 

@@ -21,8 +21,12 @@ pretrained models.
    field is editable: rename it, remove it, or add a custom one.
 3. **Automate** — send the approved data to a webhook (Zapier, Make, or
    your own endpoint), email it, archive the source PDF under a clean
-   name, or just download it as Excel. The source file is permanently
-   deleted from Nuru's cache the moment this step completes.
+   name, or just download it as Excel. "Preview what will be sent" shows
+   the exact payload first — no guessing at field names when wiring up a
+   Zap. The source file is permanently deleted from Nuru's cache the
+   moment this step completes. See
+   [docs/integrations.md](docs/integrations.md) for step-by-step
+   Zapier/Make setup.
 
 ## Project layout
 
@@ -39,7 +43,7 @@ evaluate.py      accuracy benchmark harness, see "Extraction accuracy" below
 eval/            held-out synthetic evaluation set + the generator that produces it
 tests/           pytest suite
 legal/           DRAFT ToS/Privacy Policy — not legal advice, see legal/README.md
-docs/            reference docs (SOC 2 readiness gap analysis, etc.)
+docs/            reference docs (integrations guide, SOC 2 readiness gap analysis)
 ```
 
 ## Setup

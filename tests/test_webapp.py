@@ -121,6 +121,66 @@ def test_full_scan_review_automate_discard_flow(client):
     assert b"discard" in audit_page.data
 
 
+def test_preview_shows_the_real_webhook_payload_without_sending_anything(client):
+    pdf_bytes = _make_pdf_bytes([
+        "Quantum Electronics", "Invoice Date: 2026-04-02",
+        "Total Due: $500.00", "Tax (8%): $40.00",
+    ])
+    client.post("/scan", data={"pdfs": (io.BytesIO(pdf_bytes), "invoice.pdf")},
+                content_type="multipart/form-data")
+    token = next(iter(webapp._PENDING))
+    record = webapp._PENDING[token]
+
+    resp = client.post(f"/preview/{token}", json={
+        "fields": [{"label": "Supplier Name", "value": "Quantum Electronics"}],
+        "action": "webhook",
+    })
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True
+    payload = json.loads(body["preview"])
+    assert payload["Supplier Name"] == "Quantum Electronics"
+    assert payload["_document"] == "invoice.pdf"
+    assert payload["_type"] == "Invoice"
+
+    # Preview must be a read-only look — no send, no state change, no purge.
+    assert webapp._PENDING[token]["done"] is False
+    assert os.path.exists(record["pdf_path"])
+
+
+def test_preview_archive_shows_the_computed_filename_without_moving_anything(client):
+    pdf_bytes = _make_pdf_bytes(["Acme Co", "Invoice Date: 2026-04-02", "Total Due: $10.00"])
+    client.post("/scan", data={"pdfs": (io.BytesIO(pdf_bytes), "a.pdf")},
+                content_type="multipart/form-data")
+    token = next(iter(webapp._PENDING))
+    record = webapp._PENDING[token]
+
+    resp = client.post(f"/preview/{token}", json={
+        "fields": [{"label": "Supplier Name", "value": "Acme Co"},
+                    {"label": "Transaction Date", "value": "2026-04-02"}],
+        "action": "archive",
+    })
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert "Acme_Co_2026-04-02.pdf" in body["preview"]
+    assert os.path.exists(record["pdf_path"])  # nothing actually moved
+
+
+def test_preview_with_no_action_selected_returns_400(client):
+    pdf_bytes = _make_pdf_bytes(["Acme Co", "Total Due: $10.00"])
+    client.post("/scan", data={"pdfs": (io.BytesIO(pdf_bytes), "a.pdf")},
+                content_type="multipart/form-data")
+    token = next(iter(webapp._PENDING))
+    resp = client.post(f"/preview/{token}", json={"fields": []})
+    assert resp.status_code == 400
+
+
+def test_preview_unknown_token_returns_404(client):
+    resp = client.post("/preview/does-not-exist", json={"fields": [], "action": "webhook"})
+    assert resp.status_code == 404
+    assert resp.get_json()["ok"] is False
+
+
 def test_stale_pending_review_is_auto_purged(client, tmp_path):
     """A document scanned but never reviewed to completion must not sit in
     the cache forever — this is what makes the "gone the moment automation
