@@ -3,6 +3,7 @@ cache/state file (webapp._RESULTS_DIR / _STATE_PATH) via monkeypatch, since
 importing webapp.py runs its module-level state exactly once per test
 session and a real Nuru instance may be running against the same files."""
 
+import datetime
 import io
 import json
 import os
@@ -37,6 +38,7 @@ def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp, "_RESULTS_DIR", str(cache_dir))
     monkeypatch.setattr(webapp, "_STATE_PATH", str(cache_dir / "pending_state.json"))
     monkeypatch.setattr(webapp, "_PENDING", {})
+    monkeypatch.setattr(webapp.audit, "AUDIT_LOG_PATH", str(cache_dir / "audit.log"))
     monkeypatch.delenv("NURU_ACCESS_PASSWORD", raising=False)
     yield
 
@@ -102,6 +104,44 @@ def test_full_scan_review_automate_discard_flow(client):
     assert webapp._PENDING[token]["done"] is True
     # Discarding must purge the cached source file.
     assert not os.path.exists(record["pdf_path"])
+
+    # Both the scan and the automation must have left an audit trail entry —
+    # metadata only, never the extracted field values.
+    entries = webapp.audit.read_recent()
+    events = {e["event"] for e in entries}
+    assert events == {"scanned", "automated"}
+    automated_entry = next(e for e in entries if e["event"] == "automated")
+    assert automated_entry["action"] == "discard"
+    assert automated_entry["ok"] is True
+    assert "fields" not in automated_entry
+
+    audit_page = client.get("/audit")
+    assert audit_page.status_code == 200
+    assert b"invoice.pdf" in audit_page.data
+    assert b"discard" in audit_page.data
+
+
+def test_stale_pending_review_is_auto_purged(client, tmp_path):
+    """A document scanned but never reviewed to completion must not sit in
+    the cache forever — this is what makes the "gone the moment automation
+    completes" retention story true even when someone abandons a review."""
+    stale_pdf = tmp_path / "stale.pdf"
+    stale_pdf.write_bytes(b"%PDF-fake")
+    old_time = (datetime.datetime.now(datetime.timezone.utc)
+                - datetime.timedelta(hours=webapp.REVIEW_TTL_HOURS + 1)).isoformat()
+    webapp._PENDING["stale-token"] = {
+        "pdf_path": str(stale_pdf), "original_filename": "stale.pdf", "type": "Invoice",
+        "fields": [], "notes": "", "needs_review": False, "error": False, "done": False,
+        "batch_tokens": ["stale-token"], "batch_index": 0, "created_at": old_time,
+    }
+
+    client.get("/")  # any request triggers the before_request cleanup
+
+    assert webapp._PENDING["stale-token"]["done"] is True
+    assert not stale_pdf.exists()
+    auto_purged = [e for e in webapp.audit.read_recent() if e["event"] == "auto_purged"]
+    assert len(auto_purged) == 1
+    assert auto_purged[0]["filename"] == "stale.pdf"
 
 
 def test_automate_unknown_action_returns_400(client):

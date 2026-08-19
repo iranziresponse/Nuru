@@ -32,8 +32,11 @@ data/            synthetic training data + the generator that produces it
 app.py           core extraction logic + CLI batch tool
 webapp.py        the browser UI (Scan / Review / Automate)
 automation.py    webhook / email / archive backends
+audit.py         who scanned/sent what, when — metadata only, see /audit
 train.py         training loop
 tests/           pytest suite
+legal/           DRAFT ToS/Privacy Policy — not legal advice, see legal/README.md
+docs/            reference docs (SOC 2 readiness gap analysis, etc.)
 ```
 
 ## Setup
@@ -113,10 +116,33 @@ What's in place today:
   solved one.
 
 What's deliberately **not** in place, because it needs a real decision
-rather than a default: per-user accounts and an audit log (right now it's
-one shared password, or none), TLS termination (put a reverse proxy in
-front of it), and a shared rate-limit backend for a multi-process
+rather than a default: per-user accounts (there's an audit log now, but
+"who" is still an IP address rather than a named person, since auth is
+still one shared password or none), TLS termination (put a reverse proxy
+in front of it), and a shared rate-limit backend for a multi-process
 deployment.
+
+## Compliance & trust
+
+- **Audit trail** (`audit.py`, viewable at `/audit`): every scan and every
+  automation run is logged — event, document name, inferred type, action
+  and destination, outcome, requester IP, timestamp. Deliberately
+  metadata-only; it never stores the extracted field values, so it can't
+  become a second permanent copy of the financial data it's supposed to
+  be tracking.
+- **Bounded retention even for abandoned reviews**: a document that's
+  scanned but never carried through to an automation action is
+  auto-purged after `NURU_REVIEW_TTL_HOURS` (24h default) — the "deleted
+  the moment automation completes" story used to only hold if someone
+  actually finished that step.
+- **Terms of Service / Privacy Policy**: drafted in [`legal/`](legal/),
+  grounded in what the code actually does — **not legal advice, not
+  ready to publish**. Read [`legal/README.md`](legal/README.md) first.
+- **SOC 2**: [`docs/soc2-readiness.md`](docs/soc2-readiness.md) maps what
+  a report would require against what exists today. It's a gap analysis
+  to work from, not something code alone gets you — most of it is
+  organizational process (written policies, a risk assessment cadence,
+  an actual audit engagement), not a repo change.
 
 ## Tests
 

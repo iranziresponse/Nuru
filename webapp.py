@@ -13,6 +13,7 @@ Usage:
     -> open http://127.0.0.1:5000
 """
 
+import datetime
 import json
 import os
 import secrets
@@ -24,6 +25,7 @@ from flask_limiter.util import get_remote_address
 from flask_wtf import CSRFProtect
 from werkzeug.utils import secure_filename
 
+import audit
 import automation
 from app import (
     DEFAULT_CONFIDENCE_THRESHOLD, VOCAB_PATH, WEIGHTS_PATH,
@@ -144,6 +146,39 @@ def _next_pending_token(record):
     return None
 
 
+REVIEW_TTL_HOURS = float(os.environ.get("NURU_REVIEW_TTL_HOURS", "24"))
+
+
+def _purge_stale_pending():
+    """A document that's scanned but never reviewed to completion would
+    otherwise sit in the cache indefinitely — the retention story ("gone
+    the moment its automation completes") only holds if someone actually
+    finishes that step. Anything left mid-review past the TTL gets its
+    cached source file deleted and is marked done, same as if it had been
+    explicitly discarded."""
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=REVIEW_TTL_HOURS)
+    changed = False
+    for token, record in _PENDING.items():
+        if record["done"]:
+            continue
+        created_at = record.get("created_at")
+        if not created_at:
+            continue
+        try:
+            created = datetime.datetime.fromisoformat(created_at)
+        except ValueError:
+            continue
+        if created < cutoff:
+            _purge_cached_pdf(record.get("pdf_path"))
+            record["pdf_path"] = None
+            record["done"] = True
+            audit.record("auto_purged", filename=record["original_filename"],
+                          type=record["type"], reason="review left incomplete past TTL")
+            changed = True
+    if changed:
+        _save_state()
+
+
 # ---------------------------------------------------------------- styling --
 BASE_STYLE = """
   :root {
@@ -166,6 +201,8 @@ BASE_STYLE = """
   }
   .page { max-width: 640px; margin: 0 auto; padding: 56px 24px 40px; min-height: 100vh; }
   header { display: flex; align-items: center; gap: 10px; margin-bottom: 36px; }
+  .header-link { margin-left: auto; font-size: 0.82rem; color: var(--text-soft); text-decoration: none; }
+  .header-link:hover { color: var(--navy); }
   .logo-mark { flex-shrink: 0; }
   .logo-word { font-weight: 800; font-size: 1.2rem; letter-spacing: -0.01em; color: var(--navy); }
   h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 8px; }
@@ -280,7 +317,7 @@ UPLOAD_PAGE = """
 </head>
 <body>
 <div class="page">
-  <header>""" + LOGO_SVG + """<span class="logo-word">Nuru</span></header>
+  <header>""" + LOGO_SVG + """<span class="logo-word">Nuru</span><a class="header-link" href="/audit">Audit trail</a></header>
   <main>
     <h1>Give Nuru your documents.</h1>
     <p class="tagline">Drop in invoices, receipts, or statements. Nuru reads each one, then lets you review and approve every field before anything leaves the app.</p>
@@ -346,6 +383,68 @@ EXPIRED_PAGE = """
     <p class="tagline">It may have already been completed, or it's simply expired. Start again with a fresh upload.</p>
     <a class="btn btn-primary" style="text-decoration:none; display:inline-flex;" href="/">Upload documents</a>
   </main>
+</div>
+</body>
+</html>
+"""
+
+AUDIT_STYLE = """
+  .audit-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .audit-table th { text-align: left; padding: 8px 10px; color: var(--text-soft); font-weight: 600;
+                     border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .audit-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .audit-table tr:last-child td { border-bottom: none; }
+  .audit-time { font-family: var(--font-mono, inherit); color: var(--text-soft); white-space: nowrap; font-size: 0.8rem; }
+  .audit-ok { color: var(--ok); font-weight: 600; }
+  .audit-fail { color: var(--error); font-weight: 600; }
+  .audit-empty { color: var(--text-soft); padding: 24px 0; text-align: center; }
+  .table-scroll { overflow-x: auto; }
+"""
+
+AUDIT_PAGE = """
+<!doctype html>
+<html lang="en">
+<head>""" + HEAD + """<title>Nuru | Audit trail</title><style>""" + BASE_STYLE + AUDIT_STYLE + """</style></head>
+<body>
+<div class="page">
+  <header>""" + LOGO_SVG + """<span class="logo-word">Nuru</span></header>
+  <main>
+    <h1>Audit trail</h1>
+    <p class="tagline">Every document scanned and every automation run, most recent first. Records metadata only — who, when, where, and whether it succeeded — never the extracted field values themselves.</p>
+
+    <div class="card">
+      {% if entries %}
+      <div class="table-scroll">
+        <table class="audit-table">
+          <tr><th>Time (UTC)</th><th>Event</th><th>Document</th><th>Type</th><th>Detail</th><th>Outcome</th><th>From</th></tr>
+          {% for e in entries %}
+          <tr>
+            <td class="audit-time">{{ e.timestamp }}</td>
+            <td>{{ e.event }}</td>
+            <td>{{ e.filename or "—" }}</td>
+            <td>{{ e.type or "—" }}</td>
+            <td>
+              {% if e.event == "automated" %}{{ e.action }}{% if e.destination %} &rarr; {{ e.destination }}{% endif %}
+              {% elif e.event == "scanned" %}{{ "needs review" if e.needs_review else "clean read" }}
+              {% endif %}
+            </td>
+            <td>
+              {% if e.event == "automated" %}<span class="{{ 'audit-ok' if e.ok else 'audit-fail' }}">{{ "OK" if e.ok else "Failed" }}</span>
+              {% elif e.event == "scanned" %}<span class="{{ 'audit-fail' if e.error else 'audit-ok' }}">{{ "Error" if e.error else "OK" }}</span>
+              {% endif %}
+            </td>
+            <td>{{ e.ip or "—" }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+      </div>
+      {% else %}
+      <p class="audit-empty">Nothing recorded yet.</p>
+      {% endif %}
+    </div>
+  </main>
+
+  <footer><p>Showing the most recent {{ entries|length }} entr{{ "y" if entries|length == 1 else "ies" }}.</p></footer>
 </div>
 </body>
 </html>
@@ -611,6 +710,11 @@ REVIEW_PAGE = """
 
 
 @app.before_request
+def _cleanup_stale_reviews():
+    _purge_stale_pending()
+
+
+@app.before_request
 def _require_access_password():
     """Gate every route behind HTTP Basic Auth, but only if NURU_ACCESS_PASSWORD
     is actually set. Unset (the default for local-only use) means no gate at
@@ -693,9 +797,14 @@ def scan():
             "done": False,
             "batch_tokens": None,
             "batch_index": None,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         if result["Error"]:
             _purge_cached_pdf(pdf_path)  # nothing to review; no reason to keep it cached
+        audit.record(
+            "scanned", ip=request.remote_addr, filename=filename,
+            type=result["Type"], error=result["Error"], needs_review=result["NeedsReview"],
+        )
         batch_tokens.append(token)
 
     for i, t in enumerate(batch_tokens):
@@ -780,6 +889,12 @@ def automate(token):
         record["done"] = True
         _save_state()
 
+    destination = param if action in ("webhook", "email", "archive") else None
+    audit.record(
+        "automated", ip=request.remote_addr, filename=record["original_filename"],
+        type=record["type"], action=action, destination=destination, ok=ok, message=message,
+    )
+
     return jsonify(
         ok=ok, message=message, download_url=download_url,
         next_token=_next_pending_token(record) if ok else None,
@@ -796,6 +911,11 @@ def download(token):
     record = _PENDING.get(token)
     stem = os.path.splitext(record["original_filename"])[0] if record else "Invoice"
     return send_file(xlsx_path, as_attachment=True, download_name=f"Nuru - {stem}.xlsx")
+
+
+@app.route("/audit", methods=["GET"])
+def audit_trail():
+    return render_template_string(AUDIT_PAGE, entries=audit.read_recent())
 
 
 get_model()  # fail fast if the model isn't trained yet, whether run directly or via a WSGI server
