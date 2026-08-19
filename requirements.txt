@@ -2,3 +2,5 @@ numpy
 pdfplumber
 openpyxl
 flask
+waitress
+pytesseract

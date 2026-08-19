@@ -39,7 +39,8 @@ def _load_local_env_file():
 
 _load_local_env_file()
 
-DEFAULT_ARCHIVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "archive")
+_FALLBACK_ARCHIVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "archive")
+DEFAULT_ARCHIVE_DIR = os.environ.get("NURU_ARCHIVE_DIR") or _FALLBACK_ARCHIVE_DIR
 
 
 def default_webhook_url():
@@ -47,6 +48,12 @@ def default_webhook_url():
     the review screen doesn't need it retyped for every document. Still
     overridable per document in the UI."""
     return os.environ.get("NURU_WEBHOOK_URL", "")
+
+
+def default_email_to():
+    """A pre-filled destination address from NURU_DEFAULT_EMAIL_TO, mirroring
+    the webhook/archive defaults, e.g. a standing accounts-payable inbox."""
+    return os.environ.get("NURU_DEFAULT_EMAIL_TO", "")
 
 
 def send_webhook(url, payload):

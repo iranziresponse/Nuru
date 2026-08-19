@@ -13,11 +13,11 @@ Usage:
     -> open http://127.0.0.1:5000
 """
 
+import json
 import os
-import tempfile
 import uuid
 
-from flask import Flask, jsonify, redirect, render_template_string, request, send_file
+from flask import Flask, Response, jsonify, redirect, render_template_string, request, send_file
 from werkzeug.utils import secure_filename
 
 import automation
@@ -30,10 +30,40 @@ from engine.tokenizer import Vocabulary
 
 app = Flask(__name__)
 
-_RESULTS_DIR = tempfile.mkdtemp(prefix="nuru_")
+# A stable local cache, not the OS temp dir: cached PDFs are deleted
+# explicitly the moment their automation runs (see _purge_cached_pdf), so
+# nothing here relies on the OS clearing temp files for privacy. Being
+# stable means a server restart doesn't lose documents mid-review.
+_RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".nuru_cache")
+os.makedirs(_RESULTS_DIR, exist_ok=True)
+_STATE_PATH = os.path.join(_RESULTS_DIR, "pending_state.json")
+
 _model = None
 _vocab = None
-_PENDING = {}  # token -> review record, see _scan_one() for shape
+_PENDING = {}  # token -> review record, see scan() for shape
+
+
+def _save_state():
+    try:
+        with open(_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(_PENDING, f)
+    except OSError as exc:
+        app.logger.warning(f"could not save pending state: {exc}")
+
+
+def _load_state():
+    global _PENDING
+    if not os.path.exists(_STATE_PATH):
+        return
+    try:
+        with open(_STATE_PATH, "r", encoding="utf-8") as f:
+            _PENDING = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        app.logger.warning(f"could not load pending state, starting fresh: {exc}")
+        _PENDING = {}
+
+
+_load_state()
 
 # A few common alternate phrasings per underlying entity, offered as a
 # shortcut in the review grid's label dropdown. The label text field next
@@ -378,7 +408,7 @@ REVIEW_PAGE = """
         <input type="text" id="param-webhook-input" placeholder="https://hooks.example.com/..." value="{{ default_webhook_url }}">
       </div>
       <div class="action-param" id="param-email" style="display:none;">
-        <input type="text" id="param-email-input" placeholder="accounts-payable@company.com">
+        <input type="text" id="param-email-input" placeholder="accounts-payable@company.com" value="{{ default_email_to }}">
       </div>
       <div class="action-param" id="param-archive" style="display:none;">
         <input type="text" id="param-archive-input" placeholder="{{ default_archive_dir }}" value="{{ default_archive_dir }}">
@@ -539,6 +569,23 @@ REVIEW_PAGE = """
 """
 
 
+@app.before_request
+def _require_access_password():
+    """Gate every route behind HTTP Basic Auth, but only if NURU_ACCESS_PASSWORD
+    is actually set. Unset (the default for local-only use) means no gate at
+    all — this only matters once Nuru is reachable from beyond localhost."""
+    required = os.environ.get("NURU_ACCESS_PASSWORD")
+    if not required:
+        return None
+    auth = request.authorization
+    if auth and auth.password == required:
+        return None
+    return Response(
+        "Authentication required.", 401,
+        {"WWW-Authenticate": 'Basic realm="Nuru"'},
+    )
+
+
 @app.route("/", methods=["GET"])
 def index():
     return render_template_string(UPLOAD_PAGE, error=None)
@@ -582,6 +629,7 @@ def scan():
     for i, t in enumerate(batch_tokens):
         _PENDING[t]["batch_tokens"] = batch_tokens
         _PENDING[t]["batch_index"] = i
+    _save_state()
 
     return redirect(f"/review/{batch_tokens[0]}")
 
@@ -592,15 +640,17 @@ def review(token):
     if record is None:
         return render_template_string(EXPIRED_PAGE), 404
     next_token = _next_pending_token(record)
-    if record["error"]:
+    if record["error"] and not record["done"]:
         # A failed scan has nothing to review or automate; viewing this page
         # once is the whole "completion" of it, so it won't be revisited.
         record["done"] = True
+        _save_state()
     return render_template_string(
         REVIEW_PAGE, token=token, record=record, preset_labels=PRESET_LABELS,
         threshold=DEFAULT_CONFIDENCE_THRESHOLD,
         default_archive_dir=automation.DEFAULT_ARCHIVE_DIR,
         default_webhook_url=automation.default_webhook_url(),
+        default_email_to=automation.default_email_to(),
         next_token=next_token,
     )
 
@@ -655,6 +705,7 @@ def automate(token):
     if ok:
         _purge_cached_pdf(record.get("pdf_path"))
         record["done"] = True
+        _save_state()
 
     return jsonify(
         ok=ok, message=message, download_url=download_url,
@@ -674,6 +725,7 @@ def download(token):
     return send_file(xlsx_path, as_attachment=True, download_name=f"Nuru - {stem}.xlsx")
 
 
+get_model()  # fail fast if the model isn't trained yet, whether run directly or via a WSGI server
+
 if __name__ == "__main__":
-    get_model()  # fail fast if the model isn't trained yet
     app.run(host="127.0.0.1", port=5000, debug=False)

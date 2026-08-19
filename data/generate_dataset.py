@@ -121,6 +121,29 @@ def _assemble(lines):
     return doc_tokens, doc_labels
 
 
+def _pick(rng, options):
+    return options[int(rng.integers(0, len(options)))]
+
+
+def _maybe(rng, p, line):
+    """Include a boilerplate line only some of the time, so the model can't
+    lean on one fixed document shape (a real invoice from a different vendor
+    won't always carry the same surrounding lines)."""
+    return [line] if rng.random() < p else []
+
+
+INVOICE_HEADER_PHRASINGS = ["{vendor}", "Vendor: {vendor}", "From: {vendor}", "Billed By: {vendor}"]
+INVOICE_DATE_PHRASINGS = ["Invoice Date:", "Date:", "Issued:"]
+INVOICE_TOTAL_PHRASINGS = ["Total Due:", "Total:", "Amount Due:", "Grand Total:"]
+INVOICE_TAX_PHRASINGS = ["Tax ({rate}%):", "VAT ({rate}%):", "Sales Tax ({rate}%):"]
+INVOICE_CLOSINGS = [
+    "Payment is due within 30 days. Thank you for your business.",
+    "Thank you for your business.",
+    "Please remit payment within 30 days.",
+    "Questions about this invoice? Contact billing.",
+]
+
+
 def generate_invoice_document(rng):
     vendor = VENDORS[rng.integers(0, len(VENDORS))]
     date = _iso_date(rng) if rng.random() < 0.5 else _us_date(rng)
@@ -129,17 +152,31 @@ def generate_invoice_document(rng):
     tax_amount = subtotal * (tax_rate / 100)
     total = subtotal + tax_amount
 
+    header = _pick(rng, INVOICE_HEADER_PHRASINGS).format(vendor="{vendor}")
+    header_text, header_vendor_text = header.split("{vendor}")[0], vendor
+
     lines = [
-        _line((vendor, "Vendor")),
-        _line((f"Invoice Number: {_invoice_number(rng)}", None)),
-        _line(("Invoice Date:", None), (date, "Date")),
-        _line(("Bill To: Customer Account #", None), (str(int(rng.integers(1000, 9999))), None)),
-        _line((f"Subtotal: ${subtotal:,.2f}", None)),
-        _line((f"Tax ({tax_rate}%):", None), (f"${tax_amount:,.2f}", "Tax")),
-        _line(("Total Due:", None), (f"${total:,.2f}", "Total")),
-        _line(("Payment is due within 30 days. Thank you for your business.", None)),
+        _line((header_text, None), (header_vendor_text, "Vendor")) if header_text
+        else _line((header_vendor_text, "Vendor")),
+        *_maybe(rng, 0.7, _line((f"Invoice Number: {_invoice_number(rng)}", None))),
+        _line((_pick(rng, INVOICE_DATE_PHRASINGS), None), (date, "Date")),
+        *_maybe(rng, 0.6, _line(("Bill To: Customer Account #", None),
+                                 (str(int(rng.integers(1000, 9999))), None))),
+        *_maybe(rng, 0.8, _line((f"Subtotal: ${subtotal:,.2f}", None))),
+        _line((_pick(rng, INVOICE_TAX_PHRASINGS).format(rate=tax_rate), None), (f"${tax_amount:,.2f}", "Tax")),
+        _line((_pick(rng, INVOICE_TOTAL_PHRASINGS), None), (f"${total:,.2f}", "Total")),
+        *_maybe(rng, 0.75, _line((_pick(rng, INVOICE_CLOSINGS), None))),
     ]
     return _assemble(lines)
+
+
+RECEIPT_HEADER_PHRASINGS = ["{merchant}", "Merchant: {merchant}", "Sold By: {merchant}"]
+RECEIPT_DATE_PHRASINGS = ["Purchase Date:", "Date:", "Transaction Date:"]
+RECEIPT_TOTAL_PHRASINGS = ["Amount Paid:", "Total:", "Amount:"]
+RECEIPT_METHOD_PHRASINGS = ["Payment Method:", "Paid via:", "Tender:"]
+RECEIPT_CLOSINGS = [
+    "Thank you for shopping with us.", "Come back soon!", "Have a great day.",
+]
 
 
 def generate_receipt_document(rng):
@@ -148,15 +185,29 @@ def generate_receipt_document(rng):
     amount = rng.uniform(5, 300)
     method = PAYMENT_METHODS[int(rng.integers(0, len(PAYMENT_METHODS)))]
 
+    header = _pick(rng, RECEIPT_HEADER_PHRASINGS)
+    header_text = header.split("{merchant}")[0]
+
     lines = [
-        _line((merchant, "Merchant")),
-        _line(("Purchase Date:", None), (date, "Date")),
-        _line(("Item Sundry goods x", None), (str(int(rng.integers(1, 6))), None)),
-        _line(("Amount Paid:", None), (f"${amount:,.2f}", "Total")),
-        _line(("Payment Method:", None), (method, "PaymentMethod")),
-        _line(("Thank you for shopping with us.", None)),
+        _line((header_text, None), (merchant, "Merchant")) if header_text
+        else _line((merchant, "Merchant")),
+        _line((_pick(rng, RECEIPT_DATE_PHRASINGS), None), (date, "Date")),
+        *_maybe(rng, 0.6, _line(("Item Sundry goods x", None), (str(int(rng.integers(1, 6))), None))),
+        _line((_pick(rng, RECEIPT_TOTAL_PHRASINGS), None), (f"${amount:,.2f}", "Total")),
+        _line((_pick(rng, RECEIPT_METHOD_PHRASINGS), None), (method, "PaymentMethod")),
+        *_maybe(rng, 0.7, _line((_pick(rng, RECEIPT_CLOSINGS), None))),
     ]
     return _assemble(lines)
+
+
+STATEMENT_HEADER_PHRASINGS = ["{holder}", "Account Holder: {holder}", "Prepared For: {holder}"]
+STATEMENT_PERIOD_PHRASINGS = ["Statement Period:", "Billing Period:", "Period:"]
+STATEMENT_BALANCE_PHRASINGS = ["Closing Balance:", "Ending Balance:", "Balance:"]
+STATEMENT_CLOSINGS = [
+    "This statement is generated automatically each cycle.",
+    "Please review your transactions and report any discrepancies.",
+    "Thank you for banking with us.",
+]
 
 
 def generate_statement_document(rng):
@@ -164,13 +215,17 @@ def generate_statement_document(rng):
     period = _month_year(rng)
     balance = rng.uniform(200, 15000)
 
+    header = _pick(rng, STATEMENT_HEADER_PHRASINGS)
+    header_text = header.split("{holder}")[0]
+
     lines = [
-        _line((holder, "Account")),
-        _line(("Account Summary", None)),
-        _line(("Statement Period:", None), (period, "Period")),
-        _line(("Opening Balance:", None), (f"${rng.uniform(100, 12000):,.2f}", None)),
-        _line(("Closing Balance:", None), (f"${balance:,.2f}", "Balance")),
-        _line(("This statement is generated automatically each cycle.", None)),
+        _line((header_text, None), (holder, "Account")) if header_text
+        else _line((holder, "Account")),
+        *_maybe(rng, 0.6, _line(("Account Summary", None))),
+        _line((_pick(rng, STATEMENT_PERIOD_PHRASINGS), None), (period, "Period")),
+        *_maybe(rng, 0.7, _line(("Opening Balance:", None), (f"${rng.uniform(100, 12000):,.2f}", None))),
+        _line((_pick(rng, STATEMENT_BALANCE_PHRASINGS), None), (f"${balance:,.2f}", "Balance")),
+        *_maybe(rng, 0.7, _line((_pick(rng, STATEMENT_CLOSINGS), None))),
     ]
     return _assemble(lines)
 
@@ -188,7 +243,7 @@ def main():
     rng = np.random.default_rng(RNG_SEED)
     out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dataset.csv")
 
-    docs_per_type = 220
+    docs_per_type = 350
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["doc_id", "token", "label"])

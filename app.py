@@ -91,12 +91,33 @@ def infer_document_type(found_entities):
     return "Invoice"
 
 
+def _ocr_page(page):
+    """Best-effort OCR for a page with no text layer (a scanned or
+    photographed document). Degrades to "" — never raises — whether
+    pytesseract isn't installed or the Tesseract engine itself isn't on
+    this machine; the caller falls back to the normal "no readable text"
+    path in that case."""
+    try:
+        import pytesseract
+    except ImportError:
+        return ""
+    try:
+        image = page.to_image(resolution=200).original
+        return pytesseract.image_to_string(image) or ""
+    except Exception as exc:
+        print(f"  OCR unavailable or failed: {exc}")
+        return ""
+
+
 def extract_text(pdf_path):
     """Extract text page by page.
 
     A page that fails to parse (corrupt content stream, malformed table,
     unsupported encoding) is skipped rather than raising, so it doesn't take
-    the rest of the document down with it. Returns (text, failed_page_numbers).
+    the rest of the document down with it. Returns (text, failed_page_numbers, used_ocr).
+
+    If no page yields a real text layer at all (common for a scanned or
+    phone-photographed document), falls back to OCR page by page.
     """
     text_parts = []
     failed_pages = []
@@ -109,7 +130,16 @@ def extract_text(pdf_path):
                 print(f"  warning: page {page_num} failed to parse ({exc}); skipping")
                 continue
             text_parts.append(page_text)
-    return "\n".join(text_parts), failed_pages
+
+        used_ocr = False
+        if not "".join(text_parts).strip():
+            ocr_parts = [_ocr_page(page) for page in pdf.pages]
+            ocr_parts = [t for t in ocr_parts if t.strip()]
+            if ocr_parts:
+                text_parts = ocr_parts
+                used_ocr = True
+
+    return "\n".join(text_parts), failed_pages, used_ocr
 
 
 def decode_entities(tokens, pred_labels, confidences):
@@ -178,7 +208,7 @@ def process_invoice(model, vocab, pdf_path, confidence_threshold=DEFAULT_CONFIDE
     flagged row (Error set, NeedsReview true) instead of an exception, so a
     bulk run keeps going through the rest of the batch."""
     try:
-        text, failed_pages = extract_text(pdf_path)
+        text, failed_pages, used_ocr = extract_text(pdf_path)
     except Exception as exc:
         print(f"  error opening {pdf_path}: {exc}")
         return _empty_result("This file couldn't be opened. It may be damaged or not a valid PDF.")
@@ -217,12 +247,17 @@ def process_invoice(model, vocab, pdf_path, confidence_threshold=DEFAULT_CONFIDE
         elif not value:
             missing_labels.append(display_label)
 
+    notes = _friendly_notes(low_conf_labels, missing_labels, failed_pages)
+    if used_ocr:
+        ocr_note = "This document had no selectable text, so Nuru read it with OCR. Please double-check everything below."
+        notes = f"{ocr_note} · {notes}" if notes else ocr_note
+
     return {
         "Type": doc_type,
         "Fields": fields,
         "Error": False,
-        "Notes": _friendly_notes(low_conf_labels, missing_labels, failed_pages),
-        "NeedsReview": bool(low_conf_labels) or bool(failed_pages) or bool(missing_labels),
+        "Notes": notes,
+        "NeedsReview": bool(low_conf_labels) or bool(failed_pages) or bool(missing_labels) or used_ocr,
     }
 
 
