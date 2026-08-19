@@ -1,8 +1,8 @@
 """Builds a small, fixed, held-out evaluation set: real PDF files (via
 reportlab) with hand-written ground truth, deliberately using names and
 phrasing that never appear in data/generate_dataset.py's training
-templates. This is still synthetic — it cannot substitute for real-world
-invoices — but it's a genuine generalization test rather than the model
+templates. This is still synthetic, so it cannot substitute for real-world
+invoices, but it's a genuine generalization test rather than the model
 grading its own homework on data shaped exactly like what it trained on.
 
 Run once to (re)generate eval/documents/*.pdf and eval/ground_truth.json.
@@ -37,7 +37,7 @@ def _make_pdf(filename, lines):
 CASES = [
     # --- Invoices: varied header/date/total phrasing, unseen vendor names ---
     # inv_01 deliberately puts Total before Tax, the reverse of every
-    # training example (which always goes Subtotal -> Tax -> Total) — an
+    # training example (which always goes Subtotal -> Tax -> Total): an
     # explicit order-robustness stress test, not representative of the
     # other cases below, which use the conventional order.
     ("inv_01_reversed_tax_order.pdf", [

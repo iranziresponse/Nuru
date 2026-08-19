@@ -3,14 +3,14 @@ loss/val-accuracy on the training distribution.
 
 Reports, per field and overall: how often the extracted value exactly
 matches ground truth, and whether the model's own confidence score is
-actually informative — i.e. do wrong answers get flagged as low-confidence
+actually informative, i.e. do wrong answers get flagged as low-confidence
 more often than right ones do. That second question matters more than raw
 accuracy for a review-before-send tool: a model that's occasionally wrong
 but honest about it is more useful than one that's more often right but
 never says so.
 
 IMPORTANT: eval/documents/*.pdf are synthetic (see
-eval/generate_eval_set.py) — deliberately built with names and phrasing
+eval/generate_eval_set.py), deliberately built with names and phrasing
 absent from the training generator, so this is a genuine generalization
 check, not the model grading its own homework. It is NOT a substitute for
 benchmarking against real invoices, which this project does not have
@@ -138,8 +138,8 @@ def main():
     summary = summarize(all_results, type_matches, len(ground_truth))
 
     print(f"\n{'=' * 60}")
-    print("NURU EXTRACTION ACCURACY — SYNTHETIC HELD-OUT SET")
-    print("(not a real-world accuracy claim — see evaluate.py docstring)")
+    print("NURU EXTRACTION ACCURACY: SYNTHETIC HELD-OUT SET")
+    print("(not a real-world accuracy claim, see evaluate.py docstring)")
     print(f"{'=' * 60}")
     print(f"Documents evaluated:          {summary['documents']}")
     print(f"Document-type accuracy:       {summary['document_type_accuracy']:.0%}")

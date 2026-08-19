@@ -1,5 +1,5 @@
 """Structured error logging: failures worth knowing about go to a
-persistent, rotating local log file — not just wherever stdout happens to
+persistent, rotating local log file, not just wherever stdout happens to
 be pointed, which only helps if someone is watching that terminal window
 at the exact moment something goes wrong.
 
@@ -73,7 +73,7 @@ def get_logger(name="nuru"):
 def report_exception(exc, **context):
     """Log an exception with whatever context the caller has (a filename,
     a token, an action) and forward it to Sentry if configured. Never
-    raises — a failure to report an error must not itself become one."""
+    raises: a failure to report an error must not itself become one."""
     logger = get_logger()
     try:
         logger.error(f"{exc} | {context}", exc_info=exc)

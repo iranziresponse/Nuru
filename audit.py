@@ -2,14 +2,14 @@
 
 Deliberately logs metadata, not content: the event, the document's name
 and inferred type, the action taken and its destination, and the
-outcome — never the extracted field values themselves. Nuru's whole
+outcome, never the extracted field values themselves. Nuru's whole
 privacy design is built around not keeping a second permanent copy of
 financial data lying around; an audit log that captured full field
 contents would work against that. What's recorded here is enough to
 answer "did someone send this document somewhere, when, and did it
 succeed" without doing that.
 
-"Who" is currently the requester's IP address, not a named person —
+"Who" is currently the requester's IP address, not a named person:
 Nuru has one shared access password today, not per-user accounts. A
 real identity here needs that project first; this is what's honestly
 available without it.
@@ -23,7 +23,7 @@ AUDIT_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".nuru
 
 
 def record(event, ip=None, **fields):
-    """Append one entry. Never raises — a logging failure must not break
+    """Append one entry. Never raises: a logging failure must not break
     the request that triggered it."""
     entry = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),

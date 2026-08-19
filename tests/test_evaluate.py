@@ -7,7 +7,7 @@ def test_normalize_ignores_case_and_surrounding_whitespace():
 
 def test_summarize_marks_error_documents_as_all_incorrect():
     # evaluate_document() itself calls process_invoice, which needs a real
-    # model — that path is covered by test_app.py. This targets the
+    # model; that path is covered by test_app.py. This targets the
     # summary logic against the shape evaluate_document() produces for a
     # document that failed to scan.
     results = [{
@@ -24,8 +24,8 @@ def test_summarize_computes_field_accuracy_and_confidence_calibration():
         {"field": "A", "correct": True, "flagged": False},
         {"field": "A", "correct": True, "flagged": False},
         {"field": "B", "correct": False, "flagged": True},   # wrong AND correctly flagged
-        {"field": "B", "correct": False, "flagged": False},  # wrong but NOT flagged — a real miss
-        {"field": "C", "correct": True, "flagged": True},    # right but flagged — a false alarm
+        {"field": "B", "correct": False, "flagged": False},  # wrong but NOT flagged: a real miss
+        {"field": "C", "correct": True, "flagged": True},    # right but flagged: a false alarm
     ]
     summary = summarize(results, type_matches=2, total_docs=2)
 

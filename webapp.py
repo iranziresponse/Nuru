@@ -155,7 +155,7 @@ REVIEW_TTL_HOURS = float(os.environ.get("NURU_REVIEW_TTL_HOURS", "24"))
 
 def _purge_stale_pending():
     """A document that's scanned but never reviewed to completion would
-    otherwise sit in the cache indefinitely — the retention story ("gone
+    otherwise sit in the cache indefinitely: the retention story ("gone
     the moment its automation completes") only holds if someone actually
     finishes that step. Anything left mid-review past the TTL gets its
     cached source file deleted and is marked done, same as if it had been
@@ -417,7 +417,7 @@ AUDIT_PAGE = """
   <header>""" + LOGO_SVG + """<span class="logo-word">Nuru</span></header>
   <main>
     <h1>Audit trail</h1>
-    <p class="tagline">Every document scanned and every automation run, most recent first. Records metadata only — who, when, where, and whether it succeeded — never the extracted field values themselves.</p>
+    <p class="tagline">Every document scanned and every automation run, most recent first. Records metadata only: who, when, where, and whether it succeeded, never the extracted field values themselves.</p>
 
     <div class="card">
       {% if entries %}
@@ -428,8 +428,8 @@ AUDIT_PAGE = """
           <tr>
             <td class="audit-time">{{ e.timestamp }}</td>
             <td>{{ e.event }}</td>
-            <td>{{ e.filename or "—" }}</td>
-            <td>{{ e.type or "—" }}</td>
+            <td>{{ e.filename or "N/A" }}</td>
+            <td>{{ e.type or "N/A" }}</td>
             <td>
               {% if e.event == "automated" %}{{ e.action }}{% if e.destination %} &rarr; {{ e.destination }}{% endif %}
               {% elif e.event == "scanned" %}{{ "needs review" if e.needs_review else "clean read" }}
@@ -440,7 +440,7 @@ AUDIT_PAGE = """
               {% elif e.event == "scanned" %}<span class="{{ 'audit-fail' if e.error else 'audit-ok' }}">{{ "Error" if e.error else "OK" }}</span>
               {% endif %}
             </td>
-            <td>{{ e.ip or "—" }}</td>
+            <td>{{ e.ip or "N/A" }}</td>
           </tr>
           {% endfor %}
         </table>
@@ -764,7 +764,7 @@ def _cleanup_stale_reviews():
 def _require_access_password():
     """Gate every route behind HTTP Basic Auth, but only if NURU_ACCESS_PASSWORD
     is actually set. Unset (the default for local-only use) means no gate at
-    all — this only matters once Nuru is reachable from beyond localhost.
+    all; this only matters once Nuru is reachable from beyond localhost.
 
     /healthz is always exempt: a load balancer or uptime monitor hitting it
     has no way to carry a password, and health checks failing because
@@ -785,7 +785,7 @@ def _require_access_password():
 
 
 # The templates use inline <style>/<script> blocks rather than nonces, so
-# style-src/script-src still need 'unsafe-inline' — that's a real gap in
+# style-src/script-src still need 'unsafe-inline', which is a real gap in
 # what this CSP protects against, not a solved problem. Moving to
 # per-request nonces on every inline block would close it; everything else
 # here (no third-party script hosts, no embedding, no unrelated connect
@@ -823,7 +823,7 @@ def _handle_unexpected_error(exc):
 
     HTTPException (404, 401 from the auth gate, 429 from rate limiting,
     400 from CSRF) is deliberately passed straight through to Flask's own
-    handling instead — those are expected, already-correct responses, not
+    handling instead: those are expected, already-correct responses, not
     failures worth logging as errors."""
     if isinstance(exc, HTTPException):
         return exc.get_response()
@@ -920,7 +920,7 @@ def _parse_rows(data):
 @limiter.limit("30 per minute")
 def preview(token):
     """Shows exactly what a chosen action would send or produce, without
-    actually sending or producing it — no webhook POST, no email, no file
+    actually sending or producing it: no webhook POST, no email, no file
     move. Lets someone setting up a Zap/Scenario see real field names
     before they build anything around them, addressed directly at "no
     self-serve integration story": pasting a webhook URL only gets you so
@@ -1034,7 +1034,7 @@ def healthz():
     """For a load balancer or uptime monitor, not a person. Checks the one
     thing that actually determines whether Nuru can do its job: is the
     trained model loaded. Deliberately doesn't touch the filesystem cache
-    or any automation backend — those failing shouldn't flip the whole
+    or any automation backend; those failing shouldn't flip the whole
     service to "down" for a check that's meant to be cheap and frequent."""
     if _model is None or _vocab is None:
         return jsonify(status="unhealthy", model_loaded=False), 503

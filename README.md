@@ -6,23 +6,23 @@ every field before anything leaves the app.
 
 It's built from scratch: the classifier underneath is hand-written NumPy
 (embedding lookup, a context window, a ReLU hidden layer, a softmax
-output, manually-derived backpropagation) — no PyTorch, no TensorFlow, no
+output, manually-derived backpropagation), no PyTorch, no TensorFlow, no
 pretrained models.
 
 ## How it works
 
 **Scan → Review → Automate**, each its own screen:
 
-1. **Scan** — upload one or more PDFs. Nuru extracts text (falling back to
+1. **Scan**: upload one or more PDFs. Nuru extracts text (falling back to
    OCR if a page has no text layer) and classifies each token.
-2. **Review** — Nuru infers what kind of document it is (Invoice, Receipt,
+2. **Review**: Nuru infers what kind of document it is (Invoice, Receipt,
    or Statement) from which fields it actually found, and shows only the
    fields relevant to that kind, labeled in plain business language. Every
    field is editable: rename it, remove it, or add a custom one.
-3. **Automate** — send the approved data to a webhook (Zapier, Make, or
+3. **Automate**: send the approved data to a webhook (Zapier, Make, or
    your own endpoint), email it, archive the source PDF under a clean
    name, or just download it as Excel. "Preview what will be sent" shows
-   the exact payload first — no guessing at field names when wiring up a
+   the exact payload first; no guessing at field names when wiring up a
    Zap. The source file is permanently deleted from Nuru's cache the
    moment this step completes. See
    [docs/integrations.md](docs/integrations.md) for step-by-step
@@ -36,13 +36,13 @@ data/            synthetic training data + the generator that produces it
 app.py           core extraction logic + CLI batch tool
 webapp.py        the browser UI (Scan / Review / Automate)
 automation.py    webhook / email / archive backends
-audit.py         who scanned/sent what, when — metadata only, see /audit
+audit.py         who scanned/sent what, when, metadata only, see /audit
 errors.py        structured error logging (+ optional Sentry forwarding)
 train.py         training loop
 evaluate.py      accuracy benchmark harness, see "Extraction accuracy" below
 eval/            held-out synthetic evaluation set + the generator that produces it
 tests/           pytest suite
-legal/           DRAFT ToS/Privacy Policy — not legal advice, see legal/README.md
+legal/           DRAFT ToS/Privacy Policy, not legal advice, see legal/README.md
 docs/            reference docs (integrations guide, SOC 2 readiness gap analysis)
 ```
 
@@ -63,7 +63,7 @@ clone can skip straight to running the app.
 cp nuru.local.env.example nuru.local.env
 ```
 
-Fill in whichever settings you want — every automation gracefully shows a
+Fill in whichever settings you want; every automation gracefully shows a
 "not configured" message if you skip it. See the comments in
 `nuru.local.env.example` for what each variable does. This file is
 gitignored; it never gets committed.
@@ -81,8 +81,8 @@ Opens on http://127.0.0.1:5000.
 python -m waitress --host=127.0.0.1 --port=5000 webapp:app
 ```
 
-If you ever expose Nuru beyond localhost, set `NURU_ACCESS_PASSWORD` first
-— every page then requires that password over HTTP Basic Auth. There's no
+If you ever expose Nuru beyond localhost, set `NURU_ACCESS_PASSWORD` first;
+every page then requires that password over HTTP Basic Auth. There's no
 HTTPS built in, so put it behind a reverse proxy (nginx, Caddy) if it's
 going out over a real network.
 
@@ -100,16 +100,16 @@ What's in place today:
 - **Webhook destinations are checked before sending.** Link-local addresses
   (where cloud metadata endpoints live), multicast, and reserved ranges are
   always blocked; loopback/private addresses are allowed by default (a
-  self-hosted receiver on the same machine/LAN is normal for one user) —
+  self-hosted receiver on the same machine/LAN is normal for one user);
   set `NURU_WEBHOOK_PUBLIC_ONLY=true` to also block those. Redirects are
   never followed, closing off the "safe URL that redirects to an unsafe
   one" bypass. This doesn't defend a determined DNS-rebinding attack (the
-  hostname resolving safely at check-time but differently at connect-time)
-  — that needs a transport that connects to a pinned IP, which isn't
+  hostname resolving safely at check-time but differently at connect-time);
+  that needs a transport that connects to a pinned IP, which isn't
   implemented.
 - **Archive destinations are allowlisted**, not free text. The review
   screen only offers a dropdown of `NURU_ARCHIVE_DIR` plus whatever's in
-  `NURU_ARCHIVE_ALLOWED_ROOTS` — never an arbitrary path someone typed.
+  `NURU_ARCHIVE_ALLOWED_ROOTS`, never an arbitrary path someone typed.
 - **CSRF protection** (Flask-WTF) on every state-changing route.
 - **Rate limiting** (Flask-Limiter): 60 requests/minute by default, 10/min
   on `/scan`, 20/min on `/automate`. In-memory, so it resets per process
@@ -119,7 +119,7 @@ What's in place today:
   `Strict-Transport-Security` (only takes effect once actually served over
   HTTPS). The CSP still allows `'unsafe-inline'` for styles/scripts, since
   the templates use inline `<style>`/`<script>` blocks rather than
-  per-request nonces — a real gap in what it protects against, not a
+  per-request nonces; a real gap in what it protects against, not a
   solved one.
 
 What's deliberately **not** in place, because it needs a real decision
@@ -132,22 +132,22 @@ deployment.
 ## Compliance & trust
 
 - **Audit trail** (`audit.py`, viewable at `/audit`): every scan and every
-  automation run is logged — event, document name, inferred type, action
+  automation run is logged: event, document name, inferred type, action
   and destination, outcome, requester IP, timestamp. Deliberately
   metadata-only; it never stores the extracted field values, so it can't
   become a second permanent copy of the financial data it's supposed to
   be tracking.
 - **Bounded retention even for abandoned reviews**: a document that's
   scanned but never carried through to an automation action is
-  auto-purged after `NURU_REVIEW_TTL_HOURS` (24h default) — the "deleted
+  auto-purged after `NURU_REVIEW_TTL_HOURS` (24h default); the "deleted
   the moment automation completes" story used to only hold if someone
   actually finished that step.
 - **Terms of Service / Privacy Policy**: drafted in [`legal/`](legal/),
-  grounded in what the code actually does — **not legal advice, not
+  grounded in what the code actually does. **Not legal advice, not
   ready to publish**. Read [`legal/README.md`](legal/README.md) first.
 - **SOC 2**: [`docs/soc2-readiness.md`](docs/soc2-readiness.md) maps what
   a report would require against what exists today. It's a gap analysis
-  to work from, not something code alone gets you — most of it is
+  to work from, not something code alone gets you; most of it is
   organizational process (written policies, a risk assessment cadence,
   an actual audit engagement), not a repo change.
 
@@ -172,14 +172,14 @@ python evaluate.py
 
 `evaluate.py` measures per-field accuracy, document-type accuracy, and
 whether the confidence flag is actually informative (does a wrong answer
-get flagged more often than a right one), against `eval/documents/` — a
+get flagged more often than a right one), against `eval/documents/`, a
 fixed, held-out set of synthetic PDFs whose vendor/merchant/account names
 and phrasing are deliberately absent from `data/generate_dataset.py`'s
 training templates, so it measures generalization rather than the model
 grading its own homework.
 
 **Current numbers on that set: 100% document-type accuracy, 94% field
-accuracy (62/66).** This is **not a real-world accuracy claim** — every
+accuracy (62/66).** This is **not a real-world accuracy claim**; every
 document in `eval/documents/` is still synthetic, and no benchmark against
 actual invoices from actual vendors exists. Point `evaluate.py --documents
 <dir> --ground-truth <file>` at real documents (same JSON shape as
@@ -188,7 +188,7 @@ actual invoices from actual vendors exists. Point `evaluate.py --documents
 The remaining known gap, found by running this harness rather than
 assumed: a multi-word name (vendor or merchant) with an unfamiliar middle
 word occasionally gets tagged with the wrong entity *kind* on its first
-token even when later words in the same span are tagged correctly — the
+token even when later words in the same span are tagged correctly. The
 model has no lexical signal for a word it's never seen, only local
 context, and that context is sometimes ambiguous between "this starts a
 company name" and "this starts a store name." The mismatched tag causes
@@ -200,9 +200,9 @@ or character-level features, not another logic patch.
 
 ## Operations
 
-- **Error logging** (`errors.py`): every caught failure — a page that
+- **Error logging** (`errors.py`): every caught failure (a page that
   won't parse, a webhook that won't send, an unexpected exception in a
-  route — goes to `.nuru_cache/error.log` (rotated at 2&nbsp;MB, 3
+  route) goes to `.nuru_cache/error.log` (rotated at 2&nbsp;MB, 3
   backups kept), not just wherever stdout happens to be pointed. Set
   `SENTRY_DSN` to also forward exceptions to Sentry; without it, logging
   stays local-only.
@@ -210,7 +210,7 @@ or character-level features, not another logic patch.
   `{"status": "unhealthy"}` (503) based on whether the model actually
   loaded. Exempt from the access password and rate limiting, since a load
   balancer or uptime monitor has no way to carry credentials.
-- **Docker**: `docker build -t nuru .` — the image installs Tesseract, so
+- **Docker**: `docker build -t nuru .`. The image installs Tesseract, so
   OCR works out of the box in a container even though it's optional
   locally. Runs as a non-root user, has a `HEALTHCHECK` wired to
   `/healthz`, and serves via waitress rather than Flask's dev server. Pass
@@ -225,7 +225,7 @@ or character-level features, not another logic patch.
 
 - **Trained entirely on synthetic data.** See "Extraction accuracy" above
   for the actual measured numbers and how to reproduce them. The review
-  step exists specifically to catch what it gets wrong — don't skip it in
+  step exists specifically to catch what it gets wrong; don't skip it in
   a real workflow.
 - **OCR needs Tesseract installed separately outside Docker.** `pytesseract`
   (the Python client) is in `requirements.txt`, but it calls out to the

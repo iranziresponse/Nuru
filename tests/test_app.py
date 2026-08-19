@@ -34,8 +34,8 @@ def test_infer_document_type_tax_beats_even_a_confident_merchant_guess():
     """The harder failure mode found by evaluate.py: an unfamiliar vendor
     name pattern-matched training's merchant names well enough to tag as
     Merchant at *high* confidence (0.95), while a correctly-detected Tax
-    field — which never appears in receipt/statement training data, so
-    finding one at all is close to unambiguous — sat right next to it. A
+    field (which never appears in receipt/statement training data, so
+    finding one at all is close to unambiguous) sat right next to it. A
     confidence floor alone doesn't fix this; Tax has to be checked first."""
     entity_confs = {"Merchant": [0.95], "Tax": [1.0], "Date": [1.0], "Total": [1.0]}
     assert infer_document_type(entity_confs) == "Invoice"
@@ -136,10 +136,10 @@ def test_process_invoice_handles_corrupt_pdf_without_raising(tmp_path, model_and
 
 def test_held_out_evaluation_set_meets_a_regression_floor(model_and_vocab):
     """Runs the actual eval/documents/*.pdf held-out set (deliberately
-    novel names/phrasing absent from training — see eval/generate_eval_set.py)
+    novel names/phrasing absent from training; see eval/generate_eval_set.py)
     through the real evaluation harness. Not a claim about real-world
-    accuracy (these are still synthetic documents) — a floor that catches
-    a future change quietly regressing extraction quality."""
+    accuracy (these are still synthetic documents), just a floor that
+    catches a future change quietly regressing extraction quality."""
     import json
     import os
 

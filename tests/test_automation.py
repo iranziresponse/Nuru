@@ -79,7 +79,7 @@ def test_send_webhook_rejects_metadata_endpoint():
 
 
 def test_send_webhook_does_not_follow_a_redirect():
-    """The redirect target here is a perfectly safe local server — the
+    """The redirect target here is a perfectly safe local server. The
     point is to isolate "redirects are never followed" from "unsafe
     targets are blocked" (covered separately above), by directly checking
     the target never received a request rather than matching error text,

@@ -82,7 +82,7 @@ def _webhook_host_is_safe(hostname):
     """Resolve the hostname and check every address it could mean. Blocks
     the common cases (a literal internal IP, a hostname that resolves to
     one). Does not defend a sophisticated DNS-rebinding attack, where the
-    name resolves safely here but differently at actual connect time —
+    name resolves safely here but differently at actual connect time;
     that needs a transport that connects to a pinned, pre-validated IP,
     which this stdlib implementation doesn't do."""
     public_only = os.environ.get("NURU_WEBHOOK_PUBLIC_ONLY", "").lower() in ("1", "true", "yes")
@@ -104,7 +104,7 @@ def _webhook_host_is_safe(hostname):
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """A URL that passes the safety check can still redirect to one that
-    wouldn't. Refusing to follow redirects at all closes that off — no
+    wouldn't. Refusing to follow redirects at all closes that off: no
     real webhook receiver needs Nuru to follow one."""
 
     def redirect_request(self, *args, **kwargs):
@@ -233,8 +233,8 @@ def allowed_archive_dirs():
     """The archive destinations Nuru is permitted to write to: the default
     folder, plus anything an administrator has explicitly added via
     NURU_ARCHIVE_ALLOWED_ROOTS (os.pathsep-separated). A free-text path
-    typed by whoever's using the review screen is never enough on its own
-    — otherwise "designated secure storage directory" means nothing and
+    typed by whoever's using the review screen is never enough on its own:
+    otherwise "designated secure storage directory" means nothing and
     the app will write a file anywhere it has filesystem permission to."""
     roots = [DEFAULT_ARCHIVE_DIR]
     extra = os.environ.get("NURU_ARCHIVE_ALLOWED_ROOTS", "")

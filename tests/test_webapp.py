@@ -105,7 +105,7 @@ def test_full_scan_review_automate_discard_flow(client):
     # Discarding must purge the cached source file.
     assert not os.path.exists(record["pdf_path"])
 
-    # Both the scan and the automation must have left an audit trail entry —
+    # Both the scan and the automation must have left an audit trail entry:
     # metadata only, never the extracted field values.
     entries = webapp.audit.read_recent()
     events = {e["event"] for e in entries}
@@ -143,7 +143,7 @@ def test_preview_shows_the_real_webhook_payload_without_sending_anything(client)
     assert payload["_document"] == "invoice.pdf"
     assert payload["_type"] == "Invoice"
 
-    # Preview must be a read-only look — no send, no state change, no purge.
+    # Preview must be a read-only look: no send, no state change, no purge.
     assert webapp._PENDING[token]["done"] is False
     assert os.path.exists(record["pdf_path"])
 
@@ -183,7 +183,7 @@ def test_preview_unknown_token_returns_404(client):
 
 def test_stale_pending_review_is_auto_purged(client, tmp_path):
     """A document scanned but never reviewed to completion must not sit in
-    the cache forever — this is what makes the "gone the moment automation
+    the cache forever: this is what makes the "gone the moment automation
     completes" retention story true even when someone abandons a review."""
     stale_pdf = tmp_path / "stale.pdf"
     stale_pdf.write_bytes(b"%PDF-fake")

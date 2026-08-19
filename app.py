@@ -74,7 +74,7 @@ TYPE_FIELD_CONFIG = {
 # an unfamiliar name's span can get mislabeled as the wrong entity kind
 # (an out-of-vocabulary "X & Y" name can read as either a company or a
 # merchant), and the model has no way to tell from that name alone. Tax,
-# Balance/Period, and PaymentMethod don't have that problem — their VALUES
+# Balance/Period, and PaymentMethod don't have that problem: their VALUES
 # only ever appear in one document kind's training data, so if the model
 # found one at all, it's much stronger evidence than a name-based guess.
 # Strong indicators are checked first and win outright; name-based ones
@@ -100,7 +100,7 @@ TYPE_INFERENCE_CONFIDENCE_FLOOR = 0.60
 
 
 def infer_document_type(entity_confidences, floor=TYPE_INFERENCE_CONFIDENCE_FLOOR):
-    """Pick a document kind from the entities the model found — but only
+    """Pick a document kind from the entities the model found, but only
     the ones it actually found with some conviction, and weighted so an
     ambiguous entity-name guess can't outvote a structurally unambiguous
     field. `entity_confidences` maps entity key -> list of confidences for
@@ -109,7 +109,7 @@ def infer_document_type(entity_confidences, floor=TYPE_INFERENCE_CONFIDENCE_FLOO
     Two real failure modes drove this design, both found by evaluating
     against held-out documents rather than assumed:
       1. An out-of-vocabulary name embeds as <UNK>, and the untrained
-         <UNK> embedding produces near-coin-flip predictions — the floor
+         <UNK> embedding produces near-coin-flip predictions; the floor
          below stops a low-confidence guess from counting as evidence.
       2. Even a *confident* wrong guess is possible: "Harrow & Finch Legal
          Services" pattern-matched training's merchant names ("Marlowe &
@@ -135,7 +135,7 @@ def infer_document_type(entity_confidences, floor=TYPE_INFERENCE_CONFIDENCE_FLOO
 
 def _ocr_page(page):
     """Best-effort OCR for a page with no text layer (a scanned or
-    photographed document). Degrades to "" — never raises — whether
+    photographed document). Degrades to "" and never raises, whether
     pytesseract isn't installed or the Tesseract engine itself isn't on
     this machine; the caller falls back to the normal "no readable text"
     path in that case."""

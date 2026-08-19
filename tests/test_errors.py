@@ -62,7 +62,7 @@ def test_sentry_not_configured_by_default(monkeypatch):
 
 def test_sentry_gracefully_skips_when_dsn_set_but_package_missing(monkeypatch):
     """A None entry in sys.modules is the standard way to make `import x`
-    raise ImportError regardless of whether x is actually installed —
+    raise ImportError regardless of whether x is actually installed,
     more reliable than monkeypatching __import__ itself, which doesn't
     reliably intercept an already-imported module's import statement."""
     import sys
