@@ -23,16 +23,20 @@ from flask import Flask, Response, jsonify, redirect, render_template_string, re
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf import CSRFProtect
+from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
 import audit
 import automation
+import errors
 from app import (
     DEFAULT_CONFIDENCE_THRESHOLD, VOCAB_PATH, WEIGHTS_PATH,
     process_invoice, write_excel,
 )
 from engine.model import TokenClassifier
 from engine.tokenizer import Vocabulary
+
+_logger = errors.get_logger()
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25 MB per request; blocks giant/DoS-y uploads
@@ -60,7 +64,7 @@ def _save_state():
         with open(_STATE_PATH, "w", encoding="utf-8") as f:
             json.dump(_PENDING, f)
     except OSError as exc:
-        app.logger.warning(f"could not save pending state: {exc}")
+        _logger.warning(f"could not save pending state: {exc}")
 
 
 def _load_state():
@@ -71,7 +75,7 @@ def _load_state():
         with open(_STATE_PATH, "r", encoding="utf-8") as f:
             _PENDING = json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
-        app.logger.warning(f"could not load pending state, starting fresh: {exc}")
+        _logger.warning(f"could not load pending state, starting fresh: {exc}")
         _PENDING = {}
 
 
@@ -134,7 +138,7 @@ def _purge_cached_pdf(pdf_path):
         if os.path.exists(pdf_path):
             os.remove(pdf_path)
     except OSError as exc:
-        app.logger.warning(f"could not purge cached PDF {pdf_path}: {exc}")
+        _logger.warning(f"could not purge cached PDF {pdf_path}: {exc}")
 
 
 def _next_pending_token(record):
@@ -718,7 +722,14 @@ def _cleanup_stale_reviews():
 def _require_access_password():
     """Gate every route behind HTTP Basic Auth, but only if NURU_ACCESS_PASSWORD
     is actually set. Unset (the default for local-only use) means no gate at
-    all — this only matters once Nuru is reachable from beyond localhost."""
+    all — this only matters once Nuru is reachable from beyond localhost.
+
+    /healthz is always exempt: a load balancer or uptime monitor hitting it
+    has no way to carry a password, and health checks failing because
+    nobody configured credentials for the monitoring tool defeats the
+    point of having one."""
+    if request.path == "/healthz":
+        return None
     required = os.environ.get("NURU_ACCESS_PASSWORD")
     if not required:
         return None
@@ -759,6 +770,25 @@ def _security_headers(response):
     # reverse proxy); browsers ignore it over plain HTTP.
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
+
+
+@app.errorhandler(Exception)
+def _handle_unexpected_error(exc):
+    """A final backstop: anything that reaches here escaped every
+    try/except in the actual route logic. Log it persistently (and to
+    Sentry if configured) instead of it only ever existing in Flask's
+    default traceback page, then show a plain, non-leaking message.
+
+    HTTPException (404, 401 from the auth gate, 429 from rate limiting,
+    400 from CSRF) is deliberately passed straight through to Flask's own
+    handling instead — those are expected, already-correct responses, not
+    failures worth logging as errors."""
+    if isinstance(exc, HTTPException):
+        return exc.get_response()
+    errors.report_exception(exc, path=request.path, method=request.method)
+    if request.path.startswith("/automate/"):
+        return jsonify(ok=False, message="Something went wrong on our end. Please try again."), 500
+    return "Something went wrong on our end. Please try again.", 500
 
 
 @app.route("/", methods=["GET"])
@@ -916,6 +946,19 @@ def download(token):
 @app.route("/audit", methods=["GET"])
 def audit_trail():
     return render_template_string(AUDIT_PAGE, entries=audit.read_recent())
+
+
+@app.route("/healthz", methods=["GET"])
+@limiter.exempt
+def healthz():
+    """For a load balancer or uptime monitor, not a person. Checks the one
+    thing that actually determines whether Nuru can do its job: is the
+    trained model loaded. Deliberately doesn't touch the filesystem cache
+    or any automation backend — those failing shouldn't flip the whole
+    service to "down" for a check that's meant to be cheap and frequent."""
+    if _model is None or _vocab is None:
+        return jsonify(status="unhealthy", model_loaded=False), 503
+    return jsonify(status="ok", model_loaded=True), 200
 
 
 get_model()  # fail fast if the model isn't trained yet, whether run directly or via a WSGI server

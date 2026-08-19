@@ -33,6 +33,7 @@ app.py           core extraction logic + CLI batch tool
 webapp.py        the browser UI (Scan / Review / Automate)
 automation.py    webhook / email / archive backends
 audit.py         who scanned/sent what, when — metadata only, see /audit
+errors.py        structured error logging (+ optional Sentry forwarding)
 train.py         training loop
 evaluate.py      accuracy benchmark harness, see "Extraction accuracy" below
 eval/            held-out synthetic evaluation set + the generator that produces it
@@ -193,14 +194,38 @@ fields like Tax before ever trusting an entity-name guess) closed most of
 this; what's left needs either a larger/more varied training vocabulary
 or character-level features, not another logic patch.
 
+## Operations
+
+- **Error logging** (`errors.py`): every caught failure — a page that
+  won't parse, a webhook that won't send, an unexpected exception in a
+  route — goes to `.nuru_cache/error.log` (rotated at 2&nbsp;MB, 3
+  backups kept), not just wherever stdout happens to be pointed. Set
+  `SENTRY_DSN` to also forward exceptions to Sentry; without it, logging
+  stays local-only.
+- **Health check**: `GET /healthz` returns `{"status": "ok"}` (200) or
+  `{"status": "unhealthy"}` (503) based on whether the model actually
+  loaded. Exempt from the access password and rate limiting, since a load
+  balancer or uptime monitor has no way to carry credentials.
+- **Docker**: `docker build -t nuru .` — the image installs Tesseract, so
+  OCR works out of the box in a container even though it's optional
+  locally. Runs as a non-root user, has a `HEALTHCHECK` wired to
+  `/healthz`, and serves via waitress rather than Flask's dev server. Pass
+  real config with `docker run --env-file nuru.local.env ...` or individual
+  `-e` flags. Verified this session: built, ran, and pushed a real
+  document through it end to end, including a real OCR pass on a
+  scanned-style PDF.
+- **CI** (`.github/workflows/tests.yml`): runs the full pytest suite on
+  every push and pull request to `main`.
+
 ## Known limitations
 
 - **Trained entirely on synthetic data.** See "Extraction accuracy" above
   for the actual measured numbers and how to reproduce them. The review
   step exists specifically to catch what it gets wrong — don't skip it in
   a real workflow.
-- **OCR needs Tesseract installed separately.** `pytesseract` (the Python
-  client) is in `requirements.txt`, but it calls out to the Tesseract OCR
+- **OCR needs Tesseract installed separately outside Docker.** `pytesseract`
+  (the Python client) is in `requirements.txt`, but it calls out to the
+  Tesseract OCR
   engine, which isn't a pip package. Install it from
   [github.com/tesseract-ocr/tesseract](https://github.com/tesseract-ocr/tesseract)
   (or `brew install tesseract` / `apt install tesseract-ocr`) for

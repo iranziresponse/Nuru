@@ -34,8 +34,11 @@ import pdfplumber
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill
 
+import errors
 from engine.model import ID2LABEL, TokenClassifier, build_context_windows
 from engine.tokenizer import Vocabulary, tokenize
+
+_logger = errors.get_logger()
 
 ENGINE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engine")
 WEIGHTS_PATH = os.path.join(ENGINE_DIR, "weights.npz")
@@ -144,7 +147,7 @@ def _ocr_page(page):
         image = page.to_image(resolution=200).original
         return pytesseract.image_to_string(image) or ""
     except Exception as exc:
-        print(f"  OCR unavailable or failed: {exc}")
+        _logger.warning(f"OCR unavailable or failed: {exc}")
         return ""
 
 
@@ -166,7 +169,7 @@ def extract_text(pdf_path):
                 page_text = page.extract_text() or ""
             except Exception as exc:
                 failed_pages.append(page_num)
-                print(f"  warning: page {page_num} failed to parse ({exc}); skipping")
+                _logger.warning(f"page {page_num} of {pdf_path} failed to parse; skipping: {exc}")
                 continue
             text_parts.append(page_text)
 
@@ -249,7 +252,7 @@ def process_invoice(model, vocab, pdf_path, confidence_threshold=DEFAULT_CONFIDE
     try:
         text, failed_pages, used_ocr = extract_text(pdf_path)
     except Exception as exc:
-        print(f"  error opening {pdf_path}: {exc}")
+        errors.report_exception(exc, stage="extract_text", pdf_path=pdf_path)
         return _empty_result("This file couldn't be opened. It may be damaged or not a valid PDF.")
 
     tokens = tokenize(text)
@@ -266,7 +269,7 @@ def process_invoice(model, vocab, pdf_path, confidence_threshold=DEFAULT_CONFIDE
         pred_labels = [ID2LABEL[i] for i in pred_ids]
         entity_values, entity_confs = decode_entities(tokens, pred_labels, confidences)
     except Exception as exc:
-        print(f"  error reading {pdf_path}: {exc}")
+        errors.report_exception(exc, stage="inference", pdf_path=pdf_path)
         return _empty_result("Something went wrong while reading this document. Please try again.")
 
     doc_type = infer_document_type(entity_confs)
@@ -393,7 +396,7 @@ def main():
         except Exception as exc:
             # Belt-and-suspenders: process_invoice already catches document-level
             # failures, but nothing should be able to take the whole batch down.
-            print(f"  error: unexpected failure on {pdf_path}: {exc}")
+            errors.report_exception(exc, stage="cli_batch", pdf_path=pdf_path)
             fields = _empty_result("Something went wrong while reading this document. Please try again.")
         fields["File"] = os.path.basename(pdf_path)
         rows.append(fields)
@@ -412,7 +415,7 @@ def main():
                 os.remove(pdf_path)
                 print(f"purged source: {pdf_path}")
             except OSError as exc:
-                print(f"  warning: could not purge {pdf_path}: {exc}")
+                _logger.warning(f"could not purge {pdf_path}: {exc}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,7 @@
+.git
+.nuru_cache
+nuru.local.env
+__pycache__
+*.pyc
+.pytest_cache
+archive

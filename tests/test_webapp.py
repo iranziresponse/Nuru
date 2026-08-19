@@ -188,6 +188,13 @@ def test_access_password_gate(client, monkeypatch):
     assert resp2.status_code == 200
 
 
+def test_healthz_reports_ok_and_is_exempt_from_the_access_password(client, monkeypatch):
+    monkeypatch.setenv("NURU_ACCESS_PASSWORD", "letmein")
+    resp = client.get("/healthz")  # deliberately no Authorization header
+    assert resp.status_code == 200
+    assert resp.get_json() == {"status": "ok", "model_loaded": True}
+
+
 def test_security_headers_present_on_every_response(client):
     resp = client.get("/")
     assert resp.headers["X-Content-Type-Options"] == "nosniff"

@@ -19,6 +19,10 @@ import urllib.request
 from email.message import EmailMessage
 from urllib.parse import urlparse
 
+import errors
+
+_logger = errors.get_logger()
+
 WEBHOOK_TIMEOUT_SECONDS = 10
 
 _LOCAL_ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nuru.local.env")
@@ -192,7 +196,7 @@ def send_email(to_address, subject, rows):
     except smtplib.SMTPAuthenticationError:
         return False, "The email account rejected those credentials."
     except Exception as exc:
-        print(f"  error sending email: {exc}")
+        errors.report_exception(exc, action="send_email", to=to_address)
         return False, "Something went wrong sending this email. Please try again."
 
     return True, f"Sent to {to_address}."
@@ -264,7 +268,7 @@ def archive_file(pdf_path, dest_dir, filename):
     try:
         os.makedirs(dest_dir, exist_ok=True)
     except OSError as exc:
-        print(f"  error creating archive folder {dest_dir}: {exc}")
+        errors.report_exception(exc, action="archive_mkdir", dest_dir=dest_dir)
         return False, "Couldn't create that destination folder. Please check the path and try again."
 
     dest_path = os.path.join(dest_dir, filename)
@@ -278,7 +282,7 @@ def archive_file(pdf_path, dest_dir, filename):
     try:
         shutil.move(pdf_path, dest_path)
     except OSError as exc:
-        print(f"  error archiving {pdf_path}: {exc}")
+        errors.report_exception(exc, action="archive_move", pdf_path=pdf_path, dest_dir=dest_dir)
         return False, "Couldn't move the file to that folder. Please try again."
 
     return True, f"Archived as {os.path.basename(dest_path)}."
