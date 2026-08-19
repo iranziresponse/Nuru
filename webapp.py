@@ -15,9 +15,13 @@ Usage:
 
 import json
 import os
+import secrets
 import uuid
 
 from flask import Flask, Response, jsonify, redirect, render_template_string, request, send_file
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf import CSRFProtect
 from werkzeug.utils import secure_filename
 
 import automation
@@ -30,6 +34,11 @@ from engine.tokenizer import Vocabulary
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25 MB per request; blocks giant/DoS-y uploads
+
+# In-memory storage is fine for a single-process local instance; a real
+# multi-worker deployment would need a shared backend (e.g. Redis) so
+# workers share one count instead of each enforcing its own.
+limiter = Limiter(get_remote_address, app=app, default_limits=["60 per minute"], storage_uri="memory://")
 
 # A stable local cache, not the OS temp dir: cached PDFs are deleted
 # explicitly the moment their automation runs (see _purge_cached_pdf), so
@@ -65,6 +74,30 @@ def _load_state():
 
 
 _load_state()
+
+
+def _get_or_create_secret_key():
+    """Flask-WTF's CSRF tokens are signed with this. NURU_SECRET_KEY wins if
+    set; otherwise a random key is generated once and persisted alongside
+    the other local state, so a server restart doesn't invalidate the CSRF
+    token already embedded in a page someone has open mid-review."""
+    env_key = os.environ.get("NURU_SECRET_KEY")
+    if env_key:
+        return env_key
+    key_path = os.path.join(_RESULTS_DIR, "secret_key")
+    if os.path.exists(key_path):
+        with open(key_path, "r", encoding="utf-8") as f:
+            existing = f.read().strip()
+            if existing:
+                return existing
+    key = secrets.token_hex(32)
+    with open(key_path, "w", encoding="utf-8") as f:
+        f.write(key)
+    return key
+
+
+app.config["SECRET_KEY"] = _get_or_create_secret_key()
+csrf = CSRFProtect(app)
 
 # A few common alternate phrasings per underlying entity, offered as a
 # shortcut in the review grid's label dropdown. The label text field next
@@ -210,8 +243,9 @@ REVIEW_STYLE = """
   .action-card .a-title { font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 2px; }
   .action-card .a-sub { font-size: 0.78rem; color: var(--text-soft); }
   .action-param { margin-top: 14px; }
-  .action-param input[type=text] { width: 100%; padding: 10px 12px; border: 1px solid var(--line);
-                                     border-radius: 10px; font-family: inherit; font-size: 0.92rem; }
+  .action-param input[type=text], .action-param select { width: 100%; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 10px; font-family: inherit; font-size: 0.92rem;
+    background: #fff; color: var(--text); }
 
   .result-icon { font-size: 1.6rem; }
   .next-link { display: block; text-align: center; margin-top: 16px; color: var(--navy); font-weight: 600;
@@ -252,6 +286,7 @@ UPLOAD_PAGE = """
     <p class="tagline">Drop in invoices, receipts, or statements. Nuru reads each one, then lets you review and approve every field before anything leaves the app.</p>
 
     <form method="post" action="/scan" enctype="multipart/form-data" id="upload-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label class="dropzone" id="dropzone" for="pdf-input">
         <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
           <path d="M12 3v12M12 3l-4 4M12 3l4 4" stroke="#16205c" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -412,7 +447,11 @@ REVIEW_PAGE = """
         <input type="text" id="param-email-input" placeholder="accounts-payable@company.com" value="{{ default_email_to }}">
       </div>
       <div class="action-param" id="param-archive" style="display:none;">
-        <input type="text" id="param-archive-input" placeholder="{{ default_archive_dir }}" value="{{ default_archive_dir }}">
+        <select id="param-archive-input">
+          {% for dir in allowed_archive_dirs %}
+          <option value="{{ dir }}">{{ dir }}</option>
+          {% endfor %}
+        </select>
       </div>
 
       <div class="actions-row">
@@ -440,6 +479,7 @@ REVIEW_PAGE = """
 <script>
   const token = {{ token|tojson }};
   const nextToken = {{ next_token|tojson }};
+  const csrfToken = {{ csrf_token()|tojson }};
 
   const stepReview = document.getElementById('step-review');
   const stepAutomate = document.getElementById('step-automate');
@@ -528,7 +568,7 @@ REVIEW_PAGE = """
     runBtn.disabled = true;
     fetch('/automate/' + token, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
       body: JSON.stringify({ fields: collectFields(), action: action, param: paramFor(action) }),
     })
       .then(r => r.json())
@@ -587,12 +627,43 @@ def _require_access_password():
     )
 
 
+# The templates use inline <style>/<script> blocks rather than nonces, so
+# style-src/script-src still need 'unsafe-inline' — that's a real gap in
+# what this CSP protects against, not a solved problem. Moving to
+# per-request nonces on every inline block would close it; everything else
+# here (no third-party script hosts, no embedding, no unrelated connect
+# targets) is enforced for real.
+_CSP = (
+    "default-src 'self'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src https://fonts.gstatic.com; "
+    "script-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'"
+)
+
+
+@app.after_request
+def _security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Content-Security-Policy"] = _CSP
+    # Only takes effect once actually served over HTTPS (e.g. behind a
+    # reverse proxy); browsers ignore it over plain HTTP.
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
 @app.route("/", methods=["GET"])
 def index():
     return render_template_string(UPLOAD_PAGE, error=None)
 
 
 @app.route("/scan", methods=["POST"])
+@limiter.limit("10 per minute")
 def scan():
     uploaded_files = [f for f in request.files.getlist("pdfs") if f and f.filename]
     if not uploaded_files:
@@ -649,7 +720,7 @@ def review(token):
     return render_template_string(
         REVIEW_PAGE, token=token, record=record, preset_labels=PRESET_LABELS,
         threshold=DEFAULT_CONFIDENCE_THRESHOLD,
-        default_archive_dir=automation.DEFAULT_ARCHIVE_DIR,
+        allowed_archive_dirs=automation.allowed_archive_dirs(),
         default_webhook_url=automation.default_webhook_url(),
         default_email_to=automation.default_email_to(),
         next_token=next_token,
@@ -657,6 +728,7 @@ def review(token):
 
 
 @app.route("/automate/<token>", methods=["POST"])
+@limiter.limit("20 per minute")
 def automate(token):
     record = _PENDING.get(token)
     if record is None:

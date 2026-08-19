@@ -7,14 +7,17 @@ caller can show the result inline rather than crashing the review flow.
 Standard library only, no new dependencies.
 """
 
+import ipaddress
 import json
 import os
 import re
 import shutil
 import smtplib
+import socket
 import urllib.error
 import urllib.request
 from email.message import EmailMessage
+from urllib.parse import urlparse
 
 WEBHOOK_TIMEOUT_SECONDS = 10
 
@@ -56,6 +59,57 @@ def default_email_to():
     return os.environ.get("NURU_DEFAULT_EMAIL_TO", "")
 
 
+# Always blocked, regardless of NURU_WEBHOOK_ALLOW_PRIVATE: no webhook has a
+# legitimate reason to target link-local space (this is where cloud provider
+# metadata endpoints like 169.254.169.254 live), multicast, or reserved
+# ranges. Loopback and private (RFC1918) ranges are allowed by default since
+# a self-hosted receiver on the same machine or LAN is a normal setup for a
+# single-user tool; set NURU_WEBHOOK_PUBLIC_ONLY=true to also block those,
+# which you want the moment more than one trusted person can trigger a send.
+def _ip_is_always_blocked(ip):
+    return ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified
+
+
+def _ip_is_blocked_unless_public_only_is_off(ip):
+    return ip.is_loopback or ip.is_private
+
+
+def _webhook_host_is_safe(hostname):
+    """Resolve the hostname and check every address it could mean. Blocks
+    the common cases (a literal internal IP, a hostname that resolves to
+    one). Does not defend a sophisticated DNS-rebinding attack, where the
+    name resolves safely here but differently at actual connect time —
+    that needs a transport that connects to a pinned, pre-validated IP,
+    which this stdlib implementation doesn't do."""
+    public_only = os.environ.get("NURU_WEBHOOK_PUBLIC_ONLY", "").lower() in ("1", "true", "yes")
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if _ip_is_always_blocked(ip):
+            return False
+        if public_only and _ip_is_blocked_unless_public_only_is_off(ip):
+            return False
+    return True
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A URL that passes the safety check can still redirect to one that
+    wouldn't. Refusing to follow redirects at all closes that off — no
+    real webhook receiver needs Nuru to follow one."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def send_webhook(url, payload):
     """POST the approved fields as JSON to a user-provided destination URL
     (an accounting platform endpoint, or a Zapier/Make "Catch Webhook"
@@ -63,13 +117,17 @@ def send_webhook(url, payload):
     if not url or not url.startswith(("http://", "https://")):
         return False, "That doesn't look like a valid URL. It should start with http:// or https://."
 
+    hostname = urlparse(url).hostname
+    if not hostname or not _webhook_host_is_safe(hostname):
+        return False, "That destination isn't allowed."
+
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         url, data=body, method="POST",
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=WEBHOOK_TIMEOUT_SECONDS) as response:
+        with _NO_REDIRECT_OPENER.open(request, timeout=WEBHOOK_TIMEOUT_SECONDS) as response:
             status = response.status
     except urllib.error.HTTPError as exc:
         return False, f"The destination rejected the request (status {exc.code})."
@@ -167,10 +225,42 @@ def build_archive_filename(rows, original_filename):
     return f"{name_part}{ext}"
 
 
+def allowed_archive_dirs():
+    """The archive destinations Nuru is permitted to write to: the default
+    folder, plus anything an administrator has explicitly added via
+    NURU_ARCHIVE_ALLOWED_ROOTS (os.pathsep-separated). A free-text path
+    typed by whoever's using the review screen is never enough on its own
+    — otherwise "designated secure storage directory" means nothing and
+    the app will write a file anywhere it has filesystem permission to."""
+    roots = [DEFAULT_ARCHIVE_DIR]
+    extra = os.environ.get("NURU_ARCHIVE_ALLOWED_ROOTS", "")
+    roots += [r.strip() for r in extra.split(os.pathsep) if r.strip()]
+    # de-duplicate while preserving order
+    seen = set()
+    unique = []
+    for root in roots:
+        resolved = os.path.realpath(root)
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(root)
+    return unique
+
+
+def _is_allowed_archive_dir(path):
+    resolved = os.path.realpath(path)
+    for root in allowed_archive_dirs():
+        root_resolved = os.path.realpath(root)
+        if resolved == root_resolved or resolved.startswith(root_resolved + os.sep):
+            return True
+    return False
+
+
 def archive_file(pdf_path, dest_dir, filename):
     """Move the source PDF into a designated storage directory under a
     clean corporate-standard name, creating the directory if needed."""
     dest_dir = dest_dir or DEFAULT_ARCHIVE_DIR
+    if not _is_allowed_archive_dir(dest_dir):
+        return False, "That folder isn't one of the allowed archive locations."
     try:
         os.makedirs(dest_dir, exist_ok=True)
     except OSError as exc:

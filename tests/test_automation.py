@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -51,6 +52,75 @@ def test_send_webhook_handles_connection_refused():
     ok, message = automation.send_webhook("http://127.0.0.1:1/nope", {"a": 1})
     assert ok is False
     assert "reach" in message.lower()
+
+
+# ---- SSRF guard -----------------------------------------------------------
+
+def test_link_local_and_metadata_endpoint_always_blocked():
+    assert automation._webhook_host_is_safe("169.254.169.254") is False  # cloud metadata
+    assert automation._webhook_host_is_safe("224.0.0.1") is False  # multicast
+
+
+def test_loopback_and_private_allowed_by_default_but_blockable():
+    assert automation._webhook_host_is_safe("127.0.0.1") is True
+    assert automation._webhook_host_is_safe("10.0.0.5") is True
+
+
+def test_public_only_mode_blocks_loopback_and_private(monkeypatch):
+    monkeypatch.setenv("NURU_WEBHOOK_PUBLIC_ONLY", "true")
+    assert automation._webhook_host_is_safe("127.0.0.1") is False
+    assert automation._webhook_host_is_safe("10.0.0.5") is False
+
+
+def test_send_webhook_rejects_metadata_endpoint():
+    ok, message = automation.send_webhook("http://169.254.169.254/latest/meta-data/", {"a": 1})
+    assert ok is False
+    assert "isn't allowed" in message.lower()
+
+
+def test_send_webhook_does_not_follow_a_redirect():
+    """The redirect target here is a perfectly safe local server — the
+    point is to isolate "redirects are never followed" from "unsafe
+    targets are blocked" (covered separately above), by directly checking
+    the target never received a request rather than matching error text,
+    which is sensitive to exact timing/exception-path details."""
+    target_hits = []
+
+    class TargetHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            target_hits.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    target_server = HTTPServer(("127.0.0.1", 0), TargetHandler)
+    target_port = target_server.server_address[1]
+    target_thread = threading.Thread(target=target_server.handle_request, daemon=True)
+    target_thread.start()
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{target_port}/should-not-be-reached")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    redirect_server = HTTPServer(("127.0.0.1", 0), RedirectHandler)
+    redirect_port = redirect_server.server_address[1]
+    redirect_thread = threading.Thread(target=redirect_server.handle_request, daemon=True)
+    redirect_thread.start()
+
+    ok, message = automation.send_webhook(f"http://127.0.0.1:{redirect_port}/redir", {"a": 1})
+    redirect_thread.join(timeout=2)
+
+    assert ok is False
+    assert target_hits == []  # the redirect must never have been followed
+    # target_thread is a daemon thread; if the target was (correctly) never
+    # hit, it just stays blocked in handle_request() until the process exits.
 
 
 # ---- email ---------------------------------------------------------------
@@ -127,10 +197,11 @@ def test_build_archive_filename_falls_back_when_fields_missing():
     assert name == "Document.pdf"
 
 
-def test_archive_file_moves_and_renames(tmp_path):
+def test_archive_file_moves_and_renames(tmp_path, monkeypatch):
     src = tmp_path / "source.pdf"
     src.write_bytes(b"%PDF-fake")
     dest_dir = tmp_path / "dest"
+    monkeypatch.setenv("NURU_ARCHIVE_ALLOWED_ROOTS", str(dest_dir))
 
     ok, message = automation.archive_file(str(src), str(dest_dir), "Acme_2026-04-02.pdf")
     assert ok is True
@@ -138,10 +209,11 @@ def test_archive_file_moves_and_renames(tmp_path):
     assert not src.exists()
 
 
-def test_archive_file_avoids_overwriting_existing_file(tmp_path):
+def test_archive_file_avoids_overwriting_existing_file(tmp_path, monkeypatch):
     dest_dir = tmp_path / "dest"
     dest_dir.mkdir()
     (dest_dir / "Acme.pdf").write_bytes(b"already here")
+    monkeypatch.setenv("NURU_ARCHIVE_ALLOWED_ROOTS", str(dest_dir))
 
     src = tmp_path / "source.pdf"
     src.write_bytes(b"%PDF-fake")
@@ -152,8 +224,28 @@ def test_archive_file_avoids_overwriting_existing_file(tmp_path):
     assert (dest_dir / "Acme.pdf").read_bytes() == b"already here"  # untouched
 
 
+def test_archive_file_rejects_a_destination_outside_the_allowlist(tmp_path):
+    src = tmp_path / "source.pdf"
+    src.write_bytes(b"%PDF-fake")
+    outside = tmp_path / "not_allowed"
+
+    ok, message = automation.archive_file(str(src), str(outside), "x.pdf")
+    assert ok is False
+    assert "allowed archive locations" in message
+    assert src.exists()  # nothing should have moved
+
+
 def test_default_webhook_and_email_read_from_environment(monkeypatch):
     monkeypatch.setenv("NURU_WEBHOOK_URL", "https://hooks.example.com/x")
     monkeypatch.setenv("NURU_DEFAULT_EMAIL_TO", "ap@company.com")
     assert automation.default_webhook_url() == "https://hooks.example.com/x"
     assert automation.default_email_to() == "ap@company.com"
+
+
+def test_allowed_archive_dirs_includes_extra_roots_and_stays_deduplicated(tmp_path, monkeypatch):
+    extra = tmp_path / "extra"
+    monkeypatch.setenv("NURU_ARCHIVE_ALLOWED_ROOTS", os.pathsep.join([str(extra), str(extra)]))
+    dirs = automation.allowed_archive_dirs()
+    assert automation.DEFAULT_ARCHIVE_DIR in dirs
+    assert str(extra) in dirs
+    assert dirs.count(str(extra)) == 1

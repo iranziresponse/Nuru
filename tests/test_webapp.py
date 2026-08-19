@@ -4,6 +4,7 @@ importing webapp.py runs its module-level state exactly once per test
 session and a real Nuru instance may be running against the same files."""
 
 import io
+import json
 import os
 
 import pytest
@@ -42,7 +43,13 @@ def isolated_state(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client():
+    """CSRF and rate limiting are exercised by their own dedicated tests
+    below; disabling them here is the standard way to test route logic
+    without every other test having to carry a valid CSRF token or worry
+    about tripping a shared rate-limit bucket across the whole test run."""
     webapp.app.config["TESTING"] = True
+    webapp.app.config["WTF_CSRF_ENABLED"] = False
+    webapp.app.config["RATELIMIT_ENABLED"] = False
     return webapp.app.test_client()
 
 
@@ -139,3 +146,41 @@ def test_access_password_gate(client, monkeypatch):
     creds = base64.b64encode(b"user:letmein").decode()
     resp2 = client.get("/", headers={"Authorization": f"Basic {creds}"})
     assert resp2.status_code == 200
+
+
+def test_security_headers_present_on_every_response(client):
+    resp = client.get("/")
+    assert resp.headers["X-Content-Type-Options"] == "nosniff"
+    assert resp.headers["X-Frame-Options"] == "DENY"
+    assert "default-src 'self'" in resp.headers["Content-Security-Policy"]
+
+
+def test_csrf_protection_blocks_a_tokenless_post():
+    """Uses its own client (CSRF left ON) rather than the shared `client`
+    fixture, which disables CSRF for route-logic tests elsewhere."""
+    webapp.app.config["TESTING"] = True
+    webapp.app.config["WTF_CSRF_ENABLED"] = True
+    webapp.app.config["RATELIMIT_ENABLED"] = False
+    raw_client = webapp.app.test_client()
+    try:
+        resp = raw_client.post(
+            "/automate/some-token",
+            data=json.dumps({"fields": [], "action": "discard"}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+    finally:
+        webapp.app.config["WTF_CSRF_ENABLED"] = False
+
+
+def test_rate_limit_blocks_requests_past_the_cap():
+    """Uses its own client (rate limiting left ON)."""
+    webapp.app.config["TESTING"] = True
+    webapp.app.config["WTF_CSRF_ENABLED"] = False
+    webapp.app.config["RATELIMIT_ENABLED"] = True
+    raw_client = webapp.app.test_client()
+    try:
+        statuses = [raw_client.get("/").status_code for _ in range(65)]
+        assert 429 in statuses
+    finally:
+        webapp.app.config["RATELIMIT_ENABLED"] = False

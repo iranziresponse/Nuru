@@ -82,6 +82,42 @@ python app.py invoice1.pdf invoice2.pdf --output extracted.xlsx
 python app.py documents/*.pdf --purge-source
 ```
 
+## Security
+
+What's in place today:
+
+- **Upload size capped** at 25&nbsp;MB per request (`MAX_CONTENT_LENGTH`).
+- **Webhook destinations are checked before sending.** Link-local addresses
+  (where cloud metadata endpoints live), multicast, and reserved ranges are
+  always blocked; loopback/private addresses are allowed by default (a
+  self-hosted receiver on the same machine/LAN is normal for one user) —
+  set `NURU_WEBHOOK_PUBLIC_ONLY=true` to also block those. Redirects are
+  never followed, closing off the "safe URL that redirects to an unsafe
+  one" bypass. This doesn't defend a determined DNS-rebinding attack (the
+  hostname resolving safely at check-time but differently at connect-time)
+  — that needs a transport that connects to a pinned IP, which isn't
+  implemented.
+- **Archive destinations are allowlisted**, not free text. The review
+  screen only offers a dropdown of `NURU_ARCHIVE_DIR` plus whatever's in
+  `NURU_ARCHIVE_ALLOWED_ROOTS` — never an arbitrary path someone typed.
+- **CSRF protection** (Flask-WTF) on every state-changing route.
+- **Rate limiting** (Flask-Limiter): 60 requests/minute by default, 10/min
+  on `/scan`, 20/min on `/automate`. In-memory, so it resets per process
+  and doesn't share state across multiple worker processes.
+- **Security response headers** on every response: CSP, `X-Frame-Options`,
+  `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, and
+  `Strict-Transport-Security` (only takes effect once actually served over
+  HTTPS). The CSP still allows `'unsafe-inline'` for styles/scripts, since
+  the templates use inline `<style>`/`<script>` blocks rather than
+  per-request nonces — a real gap in what it protects against, not a
+  solved one.
+
+What's deliberately **not** in place, because it needs a real decision
+rather than a default: per-user accounts and an audit log (right now it's
+one shared password, or none), TLS termination (put a reverse proxy in
+front of it), and a shared rate-limit backend for a multi-process
+deployment.
+
 ## Tests
 
 ```
