@@ -27,6 +27,21 @@ VENDORS = [
     "Evergreen Landscaping", "Maple Leaf Bakery", "Quantum Electronics",
     "Ironclad Security Systems", "Bright Path Tutoring", "Cedarwood Furniture",
     "Alpine Water Co",
+    # Extra structural variety (length, punctuation, suffixes) so the model
+    # learns to keep tagging a multi-word span through unfamiliar words
+    # rather than memorizing this specific list of names.
+    "Marsh & Fenwick Law Group", "Okoye & Partners Consulting",
+    "Whitmore-Blackburn Industries", "Castellane-Vidal Freight",
+    "Northbridge & Co", "Kestrel Ridge Holdings LLC", "Aurelia Textiles Inc",
+    "Fairhaven Trust Company", "Bramblewood Timber & Sons",
+    "Solenne Digital Media Group", "Thackeray Instruments Ltd",
+    "Meridian & Lowell Architects", "Vantage Point Robotics",
+    "Corvellis Manufacturing Co", "Hollowbrook Estate Vintners",
+    "Panopticon Data Systems", "Ashgrove & Kane Insurance",
+    "Larkspur Botanical Supply", "Windmere Shipping & Logistics",
+    "Old Quarry Stoneworks", "Fennimore Publishing House",
+    "Brightstone Capital Partners", "Ludlow & Ferris Machinery",
+    "Wren Hollow Design Studio", "Castlemaine Foods International",
 ]
 
 MERCHANTS = [
@@ -34,12 +49,21 @@ MERCHANTS = [
     "Green Leaf Grocery", "Downtown Pharmacy", "Sunset Cinema", "Metro Fuel Stop",
     "Harbor Bookshop", "Peak Outdoor Gear", "Nightly Grill", "City Bike Rentals",
     "Old Town Bakery", "Lakeside Cafe", "Trailhead Sports",
+    "Marlowe & Finch Booksellers", "The Gilded Spoon", "Northside Bike Co",
+    "Pemberton's General Store", "Hearth & Kettle Cafe", "Saltmarsh Seafood Co",
+    "Cobblestone Creamery", "Fox Hollow Nursery", "Ridgeline Outfitters",
+    "The Tinker's Workshop", "Bellamy & Rowe Deli", "Windward Surf Shop",
+    "Juniper Lane Florist", "Copper Kettle Roasters", "Thistledown Toy Shop",
 ]
 
 ACCOUNT_HOLDERS = [
     "Jordan Whitfield", "Priya Anand", "Marcus Chen", "Elena Torres",
     "Samuel Okafor", "Grace Lindqvist", "David Nakamura", "Aisha Rahman",
     "Lucas Ferreira", "Nadia Kowalski", "Ethan Brooks", "Mei Lin",
+    "Constance Beaumont-Reyes", "Julian Achterberg", "Rosalind Kwan-Mercer",
+    "Theodore Vasilenko", "Bianca Odusanya-Croft", "Rafael Quintanilla",
+    "Margarethe Solheim", "Anselm Okwuosa", "Delphine Marchetti-Hale",
+    "Kwame Adebayo-Lindstrom", "Serafina Castellano", "Oisin Fitzgerald-Muto",
 ]
 
 PAYMENT_METHODS = ["Cash", "Visa", "Mastercard", "Amex", "PayPal", "Debit"]

@@ -67,12 +67,24 @@ TYPE_FIELD_CONFIG = {
     ],
 }
 
-# Which entities, if the model finds them at all, are strong evidence of
-# which document kind. Checked in order; first match wins.
-_TYPE_INDICATORS = [
-    ("Receipt", {"Merchant", "PaymentMethod"}),
-    ("Statement", {"Account", "Period", "Balance"}),
-    ("Invoice", {"Vendor", "Tax"}),
+# Entity-name fields (Vendor/Merchant/Account) are weak signals for type:
+# an unfamiliar name's span can get mislabeled as the wrong entity kind
+# (an out-of-vocabulary "X & Y" name can read as either a company or a
+# merchant), and the model has no way to tell from that name alone. Tax,
+# Balance/Period, and PaymentMethod don't have that problem — their VALUES
+# only ever appear in one document kind's training data, so if the model
+# found one at all, it's much stronger evidence than a name-based guess.
+# Strong indicators are checked first and win outright; name-based ones
+# are only a tiebreaker when nothing decisive fired.
+_STRONG_TYPE_INDICATORS = [
+    ("Statement", {"Balance", "Period"}),
+    ("Receipt", {"PaymentMethod"}),
+    ("Invoice", {"Tax"}),
+]
+_WEAK_TYPE_INDICATORS = [
+    ("Receipt", {"Merchant"}),
+    ("Statement", {"Account"}),
+    ("Invoice", {"Vendor"}),
 ]
 
 MAX_FIELDS_PER_TYPE = max(len(cfg) for cfg in TYPE_FIELD_CONFIG.values())
@@ -81,12 +93,39 @@ LOW_CONFIDENCE_FILL = PatternFill(start_color="FFCC80", end_color="FFCC80", fill
 ERROR_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 
 
-def infer_document_type(found_entities):
-    """Pick a document kind from the set of entity keys the model actually
-    predicted somewhere in the document. Falls back to Invoice, the most
-    common case, when nothing distinctive fired."""
-    for type_name, indicators in _TYPE_INDICATORS:
-        if found_entities & indicators:
+TYPE_INFERENCE_CONFIDENCE_FLOOR = 0.60
+
+
+def infer_document_type(entity_confidences, floor=TYPE_INFERENCE_CONFIDENCE_FLOOR):
+    """Pick a document kind from the entities the model found — but only
+    the ones it actually found with some conviction, and weighted so an
+    ambiguous entity-name guess can't outvote a structurally unambiguous
+    field. `entity_confidences` maps entity key -> list of confidences for
+    every span of that entity in the document.
+
+    Two real failure modes drove this design, both found by evaluating
+    against held-out documents rather than assumed:
+      1. An out-of-vocabulary name embeds as <UNK>, and the untrained
+         <UNK> embedding produces near-coin-flip predictions — the floor
+         below stops a low-confidence guess from counting as evidence.
+      2. Even a *confident* wrong guess is possible: "Harrow & Finch Legal
+         Services" pattern-matched training's merchant names ("Marlowe &
+         Finch Booksellers") well enough to tag as Merchant at 0.95
+         confidence, while a correctly-detected Tax field (impossible on
+         a receipt or statement in training) sat right next to it,
+         unused. Checking the structurally-unambiguous fields
+         (Tax/Balance-Period/PaymentMethod) first, before ever consulting
+         a name field, fixes this without needing the name guess to stop
+         happening at all."""
+    confident_entities = {
+        key for key, confs in entity_confidences.items()
+        if confs and max(confs) >= floor
+    }
+    for type_name, indicators in _STRONG_TYPE_INDICATORS:
+        if confident_entities & indicators:
+            return type_name
+    for type_name, indicators in _WEAK_TYPE_INDICATORS:
+        if confident_entities & indicators:
             return type_name
     return "Invoice"
 
@@ -230,7 +269,7 @@ def process_invoice(model, vocab, pdf_path, confidence_threshold=DEFAULT_CONFIDE
         print(f"  error reading {pdf_path}: {exc}")
         return _empty_result("Something went wrong while reading this document. Please try again.")
 
-    doc_type = infer_document_type(set(entity_values.keys()))
+    doc_type = infer_document_type(entity_confs)
     field_config = TYPE_FIELD_CONFIG[doc_type]
 
     fields = []

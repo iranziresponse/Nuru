@@ -1,0 +1,158 @@
+{
+  "inv_01_reversed_tax_order.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Brightwater Consulting Group",
+      "Transaction Date": "2026-02-14",
+      "Total Amount Due": "$2,410.00",
+      "Tax Value (VAT/GST)": "$184.05"
+    }
+  },
+  "inv_02_from_prefix.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Palisade Marine Supply",
+      "Transaction Date": "09/03/2026",
+      "Total Amount Due": "$875.50",
+      "Tax Value (VAT/GST)": "$52.53"
+    }
+  },
+  "inv_03_vendor_label.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Kestrel Data Systems",
+      "Transaction Date": "2026-11-30",
+      "Total Amount Due": "$14,320.75",
+      "Tax Value (VAT/GST)": "$998.90"
+    }
+  },
+  "inv_04_billed_by.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Northgate Fabrication Co",
+      "Transaction Date": "05/22/2026",
+      "Total Amount Due": "$530.00",
+      "Tax Value (VAT/GST)": "$26.50"
+    }
+  },
+  "inv_05_minimal.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Sable Ridge Vineyards",
+      "Transaction Date": "2026-07-04",
+      "Total Amount Due": "$61.20",
+      "Tax Value (VAT/GST)": "$4.53"
+    }
+  },
+  "inv_06_full_boilerplate.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Harrow & Finch Legal Services",
+      "Transaction Date": "2026-03-19",
+      "Total Amount Due": "$6,540.00",
+      "Tax Value (VAT/GST)": "$540.00"
+    }
+  },
+  "rec_01_standard.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Copperline Hardware",
+      "Purchase Date": "2026-01-09",
+      "Amount Paid": "$47.88",
+      "Payment Method": "Debit"
+    }
+  },
+  "rec_02_sold_by.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Thistle & Bramble Florist",
+      "Purchase Date": "04/18/2026",
+      "Amount Paid": "$32.00",
+      "Payment Method": "Cash"
+    }
+  },
+  "rec_03_merchant_label.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Golden Hour Photography Studio",
+      "Purchase Date": "2026-06-27",
+      "Amount Paid": "$210.00",
+      "Payment Method": "Amex"
+    }
+  },
+  "rec_04_minimal.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Driftwood Surf Rentals",
+      "Purchase Date": "2026-08-02",
+      "Amount Paid": "$18.50",
+      "Payment Method": "Visa"
+    }
+  },
+  "rec_05_with_items.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Anchor Point Deli",
+      "Purchase Date": "12/24/2026",
+      "Amount Paid": "$15.75",
+      "Payment Method": "PayPal"
+    }
+  },
+  "rec_06_full_boilerplate.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Marrow Street Butchers",
+      "Purchase Date": "2026-09-15",
+      "Amount Paid": "$88.40",
+      "Payment Method": "Mastercard"
+    }
+  },
+  "stmt_01_standard.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Tobias Ferreira-Lindqvist",
+      "Statement Period": "April 2026",
+      "Closing Balance": "$9,214.60"
+    }
+  },
+  "stmt_02_holder_label.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Wren Okonkwo-Baptiste",
+      "Statement Period": "September 2026",
+      "Closing Balance": "$1,042.15"
+    }
+  },
+  "stmt_03_prepared_for.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Dashiell Vantongeren",
+      "Statement Period": "January 2026",
+      "Closing Balance": "$18,730.00"
+    }
+  },
+  "stmt_04_minimal.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Ines Castellano-Reyes",
+      "Statement Period": "June 2026",
+      "Closing Balance": "$327.90"
+    }
+  },
+  "stmt_05_with_summary.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Odalys Marchetti-Whitfield",
+      "Statement Period": "November 2026",
+      "Closing Balance": "$2,955.40"
+    }
+  },
+  "stmt_06_full_boilerplate.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Percival Nakashima-Ortiz",
+      "Statement Period": "December 2026",
+      "Closing Balance": "$1,275.00"
+    }
+  }
+}

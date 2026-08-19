@@ -34,6 +34,8 @@ webapp.py        the browser UI (Scan / Review / Automate)
 automation.py    webhook / email / archive backends
 audit.py         who scanned/sent what, when — metadata only, see /audit
 train.py         training loop
+evaluate.py      accuracy benchmark harness, see "Extraction accuracy" below
+eval/            held-out synthetic evaluation set + the generator that produces it
 tests/           pytest suite
 legal/           DRAFT ToS/Privacy Policy — not legal advice, see legal/README.md
 docs/            reference docs (SOC 2 readiness gap analysis, etc.)
@@ -156,14 +158,47 @@ decoding and document-type inference, all three automation backends, and
 the Flask routes end to end (isolated from any real running instance's
 cache and state).
 
+## Extraction accuracy
+
+```
+python eval/generate_eval_set.py   # only needed to regenerate the held-out set
+python evaluate.py
+```
+
+`evaluate.py` measures per-field accuracy, document-type accuracy, and
+whether the confidence flag is actually informative (does a wrong answer
+get flagged more often than a right one), against `eval/documents/` — a
+fixed, held-out set of synthetic PDFs whose vendor/merchant/account names
+and phrasing are deliberately absent from `data/generate_dataset.py`'s
+training templates, so it measures generalization rather than the model
+grading its own homework.
+
+**Current numbers on that set: 100% document-type accuracy, 94% field
+accuracy (62/66).** This is **not a real-world accuracy claim** — every
+document in `eval/documents/` is still synthetic, and no benchmark against
+actual invoices from actual vendors exists. Point `evaluate.py --documents
+<dir> --ground-truth <file>` at real documents (same JSON shape as
+`eval/ground_truth.json`) the moment any exist.
+
+The remaining known gap, found by running this harness rather than
+assumed: a multi-word name (vendor or merchant) with an unfamiliar middle
+word occasionally gets tagged with the wrong entity *kind* on its first
+token even when later words in the same span are tagged correctly — the
+model has no lexical signal for a word it's never seen, only local
+context, and that context is sometimes ambiguous between "this starts a
+company name" and "this starts a store name." The mismatched tag causes
+`decode_entities` to drop or truncate the span rather than guess. A
+document-level type-inference fix (checking structurally-unambiguous
+fields like Tax before ever trusting an entity-name guess) closed most of
+this; what's left needs either a larger/more varied training vocabulary
+or character-level features, not another logic patch.
+
 ## Known limitations
 
-- **Trained entirely on synthetic data.** It generalizes well to phrasing
-  and layouts it hasn't seen exactly (see the model's context-window
-  design in `engine/model.py`), but real-world documents vary more than
-  any synthetic generator can fully anticipate. The review step exists
-  specifically to catch what it gets wrong — don't skip it in a real
-  workflow.
+- **Trained entirely on synthetic data.** See "Extraction accuracy" above
+  for the actual measured numbers and how to reproduce them. The review
+  step exists specifically to catch what it gets wrong — don't skip it in
+  a real workflow.
 - **OCR needs Tesseract installed separately.** `pytesseract` (the Python
   client) is in `requirements.txt`, but it calls out to the Tesseract OCR
   engine, which isn't a pip package. Install it from

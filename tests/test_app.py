@@ -7,11 +7,38 @@ from app import (
 
 
 def test_infer_document_type_priority():
-    assert infer_document_type({"Vendor", "Tax"}) == "Invoice"
-    assert infer_document_type({"Merchant"}) == "Receipt"
-    assert infer_document_type({"PaymentMethod"}) == "Receipt"
-    assert infer_document_type({"Account", "Balance"}) == "Statement"
-    assert infer_document_type(set()) == "Invoice"  # fallback
+    assert infer_document_type({"Vendor": [0.95], "Tax": [0.9]}) == "Invoice"
+    assert infer_document_type({"Merchant": [0.95]}) == "Receipt"
+    assert infer_document_type({"PaymentMethod": [0.9]}) == "Receipt"
+    assert infer_document_type({"Account": [0.9], "Balance": [0.9]}) == "Statement"
+    assert infer_document_type({}) == "Invoice"  # fallback
+
+
+def test_infer_document_type_ignores_low_confidence_noise():
+    """A single near-coin-flip Merchant guess (e.g. from an <UNK> embedding
+    on an out-of-vocabulary name) must not override strong, confident
+    evidence for a different type elsewhere in the same document."""
+    entity_confs = {
+        "Vendor": [0.95], "Date": [1.0], "Total": [1.0], "Tax": [1.0],
+        "Merchant": [0.45],  # spurious, low-confidence
+    }
+    assert infer_document_type(entity_confs) == "Invoice"
+
+
+def test_infer_document_type_still_trusts_confident_receipt_signal():
+    entity_confs = {"Merchant": [0.92], "PaymentMethod": [0.88]}
+    assert infer_document_type(entity_confs) == "Receipt"
+
+
+def test_infer_document_type_tax_beats_even_a_confident_merchant_guess():
+    """The harder failure mode found by evaluate.py: an unfamiliar vendor
+    name pattern-matched training's merchant names well enough to tag as
+    Merchant at *high* confidence (0.95), while a correctly-detected Tax
+    field — which never appears in receipt/statement training data, so
+    finding one at all is close to unambiguous — sat right next to it. A
+    confidence floor alone doesn't fix this; Tax has to be checked first."""
+    entity_confs = {"Merchant": [0.95], "Tax": [1.0], "Date": [1.0], "Total": [1.0]}
+    assert infer_document_type(entity_confs) == "Invoice"
 
 
 def test_type_field_config_covers_every_document_kind():
@@ -105,3 +132,37 @@ def test_process_invoice_handles_corrupt_pdf_without_raising(tmp_path, model_and
     assert result["Error"] is True
     assert result["Fields"] == []
     assert result["NeedsReview"] is True
+
+
+def test_held_out_evaluation_set_meets_a_regression_floor(model_and_vocab):
+    """Runs the actual eval/documents/*.pdf held-out set (deliberately
+    novel names/phrasing absent from training — see eval/generate_eval_set.py)
+    through the real evaluation harness. Not a claim about real-world
+    accuracy (these are still synthetic documents) — a floor that catches
+    a future change quietly regressing extraction quality."""
+    import json
+    import os
+
+    from evaluate import evaluate_document, summarize
+
+    model, vocab = model_and_vocab
+    ground_truth_path = os.path.join("eval", "ground_truth.json")
+    documents_dir = os.path.join("eval", "documents")
+    if not os.path.exists(ground_truth_path):
+        pytest.skip("eval set not generated; run eval/generate_eval_set.py first")
+
+    with open(ground_truth_path, "r", encoding="utf-8") as f:
+        ground_truth = json.load(f)
+
+    all_results, type_matches = [], 0
+    for filename, expected in ground_truth.items():
+        results, inferred_type = evaluate_document(
+            model, vocab, os.path.join(documents_dir, filename), expected, 0.70,
+        )
+        all_results.extend(results)
+        if inferred_type == expected["type"]:
+            type_matches += 1
+
+    summary = summarize(all_results, type_matches, len(ground_truth))
+    assert summary["document_type_accuracy"] >= 0.90
+    assert summary["field_accuracy"] >= 0.85
