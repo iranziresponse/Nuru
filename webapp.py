@@ -29,6 +29,7 @@ from engine.model import TokenClassifier
 from engine.tokenizer import Vocabulary
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25 MB per request; blocks giant/DoS-y uploads
 
 # A stable local cache, not the OS temp dir: cached PDFs are deleted
 # explicitly the moment their automation runs (see _purge_cached_pdf), so
