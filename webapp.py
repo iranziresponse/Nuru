@@ -375,7 +375,7 @@ REVIEW_PAGE = """
       </div>
 
       <div class="action-param" id="param-webhook" style="display:none;">
-        <input type="text" id="param-webhook-input" placeholder="https://hooks.example.com/...">
+        <input type="text" id="param-webhook-input" placeholder="https://hooks.example.com/..." value="{{ default_webhook_url }}">
       </div>
       <div class="action-param" id="param-email" style="display:none;">
         <input type="text" id="param-email-input" placeholder="accounts-payable@company.com">
@@ -600,6 +600,7 @@ def review(token):
         REVIEW_PAGE, token=token, record=record, preset_labels=PRESET_LABELS,
         threshold=DEFAULT_CONFIDENCE_THRESHOLD,
         default_archive_dir=automation.DEFAULT_ARCHIVE_DIR,
+        default_webhook_url=automation.default_webhook_url(),
         next_token=next_token,
     )
 

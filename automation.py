@@ -42,6 +42,13 @@ _load_local_env_file()
 DEFAULT_ARCHIVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "archive")
 
 
+def default_webhook_url():
+    """A pre-filled webhook URL from NURU_WEBHOOK_URL, if one is set, so
+    the review screen doesn't need it retyped for every document. Still
+    overridable per document in the UI."""
+    return os.environ.get("NURU_WEBHOOK_URL", "")
+
+
 def send_webhook(url, payload):
     """POST the approved fields as JSON to a user-provided destination URL
     (an accounting platform endpoint, or a Zapier/Make "Catch Webhook"
