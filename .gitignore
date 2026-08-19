@@ -1,0 +1,4 @@
+nuru.local.env
+__pycache__/
+*.pyc
+archive/
