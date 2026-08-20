@@ -27,12 +27,16 @@ Usage:
 """
 
 import argparse
+import datetime
 import glob
+import math
 import os
+import re
 
 import pdfplumber
 from openpyxl import Workbook
-from openpyxl.styles import PatternFill
+from openpyxl.comments import Comment
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 import errors
 from engine.model import ID2LABEL, TokenClassifier, build_context_windows
@@ -92,8 +96,76 @@ _WEAK_TYPE_INDICATORS = [
 
 MAX_FIELDS_PER_TYPE = max(len(cfg) for cfg in TYPE_FIELD_CONFIG.values())
 
-LOW_CONFIDENCE_FILL = PatternFill(start_color="FFCC80", end_color="FFCC80", fill_type="solid")
-ERROR_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+# The same navy/cyan identity as the web UI (webapp.py's BASE_STYLE), so the
+# spreadsheet a reviewer downloads looks like it came from the same product,
+# not a generic script export.
+_NAVY = "16205C"
+_NAVY_DARK = "0E1740"
+_CYAN_TINT = "E8F9FD"
+_LINE = "D7DCE8"
+_TEXT = "16203D"
+_TEXT_SOFT = "6B7590"
+_OK_TEXT, _OK_TINT = "2F6F52", "E9F4EE"
+_WARN_TEXT, _WARN_TINT = "A8621A", "FBEDD8"
+_ERROR_TEXT, _ERROR_TINT = "A8402F", "FAEAE6"
+_RECEIPT_TEXT, _RECEIPT_TINT = "1F6F4A", "E3F6EC"
+_STATEMENT_TEXT, _STATEMENT_TINT = "4B3B93", "EFEAFB"
+_TYPE_CHIP = {
+    "Invoice": (_NAVY, _CYAN_TINT),
+    "Receipt": (_RECEIPT_TEXT, _RECEIPT_TINT),
+    "Statement": (_STATEMENT_TEXT, _STATEMENT_TINT),
+}
+
+HEADER_FILL = PatternFill(start_color=_NAVY, end_color=_NAVY, fill_type="solid")
+BAND_FILL = PatternFill(start_color=_CYAN_TINT, end_color=_CYAN_TINT, fill_type="solid")
+LOW_CONFIDENCE_FILL = PatternFill(start_color=_WARN_TINT, end_color=_WARN_TINT, fill_type="solid")
+ERROR_FILL = PatternFill(start_color=_ERROR_TINT, end_color=_ERROR_TINT, fill_type="solid")
+VERIFY_OK_FILL = PatternFill(start_color=_OK_TINT, end_color=_OK_TINT, fill_type="solid")
+VERIFY_WARN_FILL = PatternFill(start_color=_WARN_TINT, end_color=_WARN_TINT, fill_type="solid")
+
+_THIN = Side(style="thin", color=_LINE)
+_CELL_BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
+
+_FONT_FAMILY = "Calibri"
+
+
+def _font(size=11, bold=False, italic=False, color=_TEXT):
+    return Font(name=_FONT_FAMILY, size=size, bold=bold, italic=italic, color=color)
+
+
+_MONEY_RE = re.compile(r"^\(?-?\$?\s?[\d,]+(?:\.\d+)?\)?$")
+
+
+def _parse_money(value):
+    """Recognizes a plain currency-looking string ("$1,234.56", "(200.00)")
+    so it can be written as a real Excel number with currency formatting
+    instead of inert text, letting a reviewer sum or sort amounts natively
+    rather than re-typing them. Returns None for anything else and never
+    raises."""
+    if not value:
+        return None
+    text = value.strip()
+    if not _MONEY_RE.match(text):
+        return None
+    negative = text.startswith("(") and text.endswith(")")
+    cleaned = text.strip("()").replace("$", "").replace(",", "").strip()
+    try:
+        number = float(cleaned)
+    except ValueError:
+        return None
+    return -number if negative else number
+
+
+def _wrapped_row_height(text, width_chars, base_height=18, line_height=14):
+    """A column that's allowed to grow without bound for one long note
+    would force every other column absurdly wide too. Capping that
+    column's width and instead wrapping the text, with the row grown
+    tall enough to show every line, is how a real template handles
+    unpredictable-length text without asking anyone to resize anything."""
+    if not text:
+        return base_height
+    lines = max(1, math.ceil(len(text) / width_chars))
+    return max(base_height, lines * line_height)
 
 
 TYPE_INFERENCE_CONFIDENCE_FLOOR = 0.60
@@ -303,6 +375,43 @@ def process_invoice(model, vocab, pdf_path, confidence_threshold=DEFAULT_CONFIDE
     }
 
 
+_MIN_COL_WIDTH = 10
+_MAX_COL_WIDTH = 34
+_DETAILS_COL_WIDTH = 46
+
+
+def _style_header_cell(cell):
+    cell.fill = HEADER_FILL
+    cell.font = _font(size=11, bold=True, color="FFFFFF")
+    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cell.border = _CELL_BORDER
+
+
+def _style_title_band(ws, total_cols, subtitle, meta):
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
+    title_cell = ws.cell(row=1, column=1, value="NURU")
+    title_cell.font = _font(size=22, bold=True, color=_NAVY)
+    title_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[1].height = 34
+
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=total_cols)
+    subtitle_cell = ws.cell(row=2, column=1, value=subtitle)
+    subtitle_cell.font = _font(size=12, color=_TEXT_SOFT)
+    subtitle_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[2].height = 20
+
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=total_cols)
+    meta_cell = ws.cell(row=3, column=1, value=meta)
+    meta_cell.font = _font(size=9, italic=True, color=_TEXT_SOFT)
+    meta_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[3].height = 16
+
+    accent = ws.cell(row=4, column=1)
+    for col in range(1, total_cols + 1):
+        ws.cell(row=4, column=col).fill = HEADER_FILL
+    ws.row_dimensions[4].height = 3
+
+
 def write_excel(rows, output_path, confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD):
     """Each row's own inferred type picks its own field labels, so a batch
     mixing invoices, receipts, and statements doesn't force one header row
@@ -310,51 +419,202 @@ def write_excel(rows, output_path, confidence_threshold=DEFAULT_CONFIDENCE_THRES
     sized to whatever the widest row in this call actually has (a
     user-reviewed row can carry more custom fields than any built-in type
     schema), since a flat sheet can't otherwise represent rows with
-    genuinely different schemas."""
+    genuinely different schemas.
+
+    Every column then auto-sizes to its own content (capped, with the
+    notes column wrapping instead of growing unbounded) so nothing needs
+    to be resized by hand after opening the file, and the report reads
+    as a finished document rather than a raw data dump: a branded title
+    band, colored status chips instead of plain text, real currency
+    numbers where a value looks like money, and a short legend sheet
+    explaining what each color means."""
     wb = Workbook()
     ws = wb.active
-    ws.title = "Nuru"
+    ws.title = "Records"
+    ws.sheet_view.showGridLines = False
+
     max_fields = max((len(row.get("Fields", [])) for row in rows), default=0)
     max_fields = max(max_fields, 1)
     headers = ["Document", "Type"]
     for i in range(1, max_fields + 1):
         headers += [f"Field {i}", f"Value {i}"]
     headers += ["Please Verify", "Details"]
-    ws.append(headers)
+    total_cols = len(headers)
+
+    generated = datetime.datetime.now().strftime("%B %d, %Y at %H:%M")
+    doc_word = "document" if len(rows) == 1 else "documents"
+    _style_title_band(
+        ws, total_cols, "Document Extraction Report",
+        f"Generated {generated}. {len(rows)} {doc_word}. "
+        f"Fields below {confidence_threshold:.0%} confidence are flagged for review.",
+    )
+
+    header_row = 5
+    for col, text in enumerate(headers, start=1):
+        _style_header_cell(ws.cell(row=header_row, column=col, value=text))
+    ws.row_dimensions[header_row].height = 22
+    ws.freeze_panes = f"A{header_row + 1}"
+    ws.auto_filter.ref = f"A{header_row}:{ws.cell(row=header_row, column=total_cols).coordinate}"
+
+    details_col = total_cols
+    verify_col = total_cols - 1
 
     for row in rows:
         fields = row.get("Fields", [])
-        line = [row["File"], row.get("Type") or ""]
+        notes = row.get("Notes") or ""
+        r = ws.max_row + 1
+
+        doc_cell = ws.cell(row=r, column=1, value=row["File"])
+        doc_cell.font = _font(bold=True)
+
+        doc_type = row.get("Type")
+        type_cell = ws.cell(row=r, column=2, value=doc_type or "Unrecognized")
+        chip_text, chip_fill = _TYPE_CHIP.get(doc_type, (_TEXT_SOFT, "F1F2F6"))
+        type_cell.font = _font(bold=True, color=chip_text)
+        type_cell.fill = PatternFill(start_color=chip_fill, end_color=chip_fill, fill_type="solid")
+        type_cell.alignment = Alignment(horizontal="center", vertical="center")
+
         for i in range(max_fields):
-            if i < len(fields):
-                line += [fields[i]["label"], fields[i]["value"]]
+            label_col, value_col = 3 + i * 2, 4 + i * 2
+            field = fields[i] if i < len(fields) else None
+            label = field["label"] if field else ""
+            value = field["value"] if field else ""
+
+            label_cell = ws.cell(row=r, column=label_col, value=label)
+            label_cell.font = _font(color=_TEXT_SOFT)
+
+            value_cell = ws.cell(row=r, column=value_col)
+            amount = _parse_money(value)
+            if amount is not None:
+                value_cell.value = amount
+                value_cell.number_format = "$#,##0.00"
+                value_cell.alignment = Alignment(horizontal="right")
             else:
-                line += ["", ""]
-        line += [
-            "Please double-check" if row.get("NeedsReview") else "Looks good",
-            row.get("Notes", ""),
-        ]
-        ws.append(line)
-        r = ws.max_row
+                value_cell.value = value
+            value_cell.font = _font()
 
-        if row.get("Error"):
-            for col in range(1, len(headers) + 1):
-                ws.cell(row=r, column=col).fill = ERROR_FILL
+            if field is not None:
+                conf = field.get("confidence")
+                low_confidence = value and conf is not None and conf < confidence_threshold
+                missing = not value
+                if low_confidence or missing:
+                    value_cell.fill = LOW_CONFIDENCE_FILL
+                    value_cell.font = _font(bold=True, color=_WARN_TEXT)
+                    note = ("This field could not be found in the document."
+                            if missing else
+                            f"Nuru was only {conf:.0%} confident in this value. Please verify against the source document.")
+                    value_cell.comment = Comment(note, "Nuru")
+
+        is_error = bool(row.get("Error"))
+        needs_review = bool(row.get("NeedsReview"))
+        if is_error:
+            verify_text = "Could not scan"
+        elif needs_review:
+            verify_text = "Please double-check"
+        else:
+            verify_text = "Looks good"
+        verify_cell = ws.cell(row=r, column=verify_col, value=verify_text)
+        verify_cell.alignment = Alignment(horizontal="center", vertical="center")
+        if not is_error:
+            if needs_review:
+                verify_cell.fill = VERIFY_WARN_FILL
+                verify_cell.font = _font(bold=True, color=_WARN_TEXT)
+            else:
+                verify_cell.fill = VERIFY_OK_FILL
+                verify_cell.font = _font(bold=True, color=_OK_TEXT)
+
+        details_cell = ws.cell(row=r, column=details_col, value=notes)
+        details_cell.font = _font(color=_TEXT_SOFT)
+        details_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        ws.row_dimensions[r].height = _wrapped_row_height(notes, _DETAILS_COL_WIDTH)
+
+        if is_error:
+            for col in range(1, total_cols + 1):
+                cell = ws.cell(row=r, column=col)
+                cell.fill = ERROR_FILL
+                cell.font = _font(bold=(col == 1), color=_ERROR_TEXT)
+
+        for col in range(1, total_cols + 1):
+            ws.cell(row=r, column=col).border = _CELL_BORDER
+
+    for col in range(1, total_cols + 1):
+        letter = ws.cell(row=header_row, column=col).column_letter
+        if col == details_col:
+            ws.column_dimensions[letter].width = _DETAILS_COL_WIDTH
             continue
-        for i, field in enumerate(fields):
-            value_col = 4 + i * 2  # Document=1, Type=2, Field1=3, Value1=4, Field2=5, Value2=6, ...
-            conf = field.get("confidence")
-            low_confidence = field.get("value") and conf is not None and conf < confidence_threshold
-            missing = not field.get("value")
-            if low_confidence or missing:
-                ws.cell(row=r, column=value_col).fill = LOW_CONFIDENCE_FILL
-        if row.get("NeedsReview"):
-            ws.cell(row=r, column=len(headers) - 1).fill = LOW_CONFIDENCE_FILL
+        header_len = len(headers[col - 1])
+        content_len = max(
+            (len(str(ws.cell(row=r, column=col).value))
+             for r in range(header_row + 1, ws.max_row + 1)
+             if ws.cell(row=r, column=col).value is not None),
+            default=0,
+        )
+        width = max(header_len, content_len) + 3
+        ws.column_dimensions[letter].width = min(max(width, _MIN_COL_WIDTH), _MAX_COL_WIDTH)
 
-    for col_cells in ws.columns:
-        width = max(len(str(cell.value)) for cell in col_cells if cell.value is not None) + 2
-        ws.column_dimensions[col_cells[0].column_letter].width = max(width, 10)
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+    _write_legend_sheet(wb, len(rows), confidence_threshold)
     wb.save(output_path)
+
+
+def _write_legend_sheet(wb, document_count, confidence_threshold):
+    ws = wb.create_sheet("About this report")
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions["A"].width = 26
+    ws.column_dimensions["B"].width = 70
+
+    _style_title_band(
+        ws, 2, "About this report",
+        "What the colors in the Records sheet mean, and how this file was produced.",
+    )
+
+    rows = [
+        ("Colored type chip", "The kind of document Nuru recognized: Invoice, Receipt, or Statement, "
+                               "inferred from which fields were actually found, not fixed in advance."),
+        ("Amber value cell", "Nuru flagged this specific value for a human to verify, either because "
+                              "it was not found or because the model's own confidence in it was below "
+                              f"{confidence_threshold:.0%}. Hover the cell for the exact reason."),
+        ("Green Please Verify chip", "Every field on this row met the confidence threshold. Still worth "
+                                      "a glance, not a guarantee."),
+        ("Amber Please Verify chip", "At least one field on this row needs a second look before you "
+                                      "rely on it."),
+        ("Red row", "This document could not be read at all. See its Details cell for why."),
+    ]
+    header_row = 5
+    for col, text in enumerate(["What you see", "What it means"], start=1):
+        _style_header_cell(ws.cell(row=header_row, column=col, value=text))
+    ws.row_dimensions[header_row].height = 20
+
+    for i, (label, meaning) in enumerate(rows):
+        r = header_row + 1 + i
+        label_cell = ws.cell(row=r, column=1, value=label)
+        label_cell.font = _font(bold=True)
+        label_cell.alignment = Alignment(vertical="top", wrap_text=True)
+        meaning_cell = ws.cell(row=r, column=2, value=meaning)
+        meaning_cell.font = _font(color=_TEXT_SOFT)
+        meaning_cell.alignment = Alignment(vertical="top", wrap_text=True)
+        ws.row_dimensions[r].height = _wrapped_row_height(meaning, 70)
+        for col in (1, 2):
+            ws.cell(row=r, column=col).border = _CELL_BORDER
+        if i % 2 == 1:
+            for col in (1, 2):
+                ws.cell(row=r, column=col).fill = BAND_FILL
+
+    footer_row = header_row + len(rows) + 2
+    ws.merge_cells(start_row=footer_row, start_column=1, end_row=footer_row, end_column=2)
+    footer_cell = ws.cell(
+        row=footer_row, column=1,
+        value=f"Covers {document_count} document(s). Extraction runs entirely on this machine, using a "
+              f"hand-built model with no pretrained weights; no document content or extracted value is "
+              f"sent to any third-party AI service.",
+    )
+    footer_cell.font = _font(size=9, italic=True, color=_TEXT_SOFT)
+    footer_cell.alignment = Alignment(vertical="top", wrap_text=True)
+    ws.row_dimensions[footer_row].height = _wrapped_row_height(footer_cell.value, 90)
 
 
 def main():

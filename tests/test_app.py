@@ -1,8 +1,10 @@
 import pytest
+from openpyxl import load_workbook
 
 from app import (
     TYPE_FIELD_CONFIG, VOCAB_PATH, WEIGHTS_PATH,
-    decode_entities, infer_document_type, process_invoice,
+    _parse_money, _wrapped_row_height,
+    decode_entities, infer_document_type, process_invoice, write_excel,
 )
 
 
@@ -166,3 +168,121 @@ def test_held_out_evaluation_set_meets_a_regression_floor(model_and_vocab):
     summary = summarize(all_results, type_matches, len(ground_truth))
     assert summary["document_type_accuracy"] >= 0.90
     assert summary["field_accuracy"] >= 0.85
+
+
+# ---- write_excel ------------------------------------------------------------
+
+def test_parse_money_recognizes_currency_strings():
+    assert _parse_money("$1,339.20") == 1339.20
+    assert _parse_money("(200.00)") == -200.0
+    assert _parse_money("47.88") == 47.88
+
+
+def test_parse_money_rejects_non_money_text():
+    assert _parse_money("Acme Co") is None
+    assert _parse_money("") is None
+    assert _parse_money(None) is None
+
+
+def test_wrapped_row_height_grows_with_text_length():
+    short = _wrapped_row_height("hi", width_chars=40)
+    long = _wrapped_row_height("x" * 200, width_chars=40)
+    assert long > short
+    assert _wrapped_row_height("", width_chars=40) == 18
+
+
+def _sample_rows():
+    return [
+        {
+            "File": "invoice_acme.pdf", "Type": "Invoice",
+            "Fields": [
+                {"label": "Supplier Name", "value": "Acme Co", "confidence": 0.95, "key": "Vendor"},
+                {"label": "Transaction Date", "value": "2026-01-15", "confidence": 0.4, "key": "Date"},
+                {"label": "Total Amount Due", "value": "$1,339.20", "confidence": 0.99, "key": "Total"},
+                {"label": "Tax Value (VAT/GST)", "value": "", "confidence": None, "key": "Tax"},
+            ],
+            "NeedsReview": True, "Notes": "Needs a second look.", "Error": False,
+        },
+        {
+            "File": "receipt_shop.pdf", "Type": "Receipt",
+            "Fields": [
+                {"label": "Merchant", "value": "Copperline Hardware", "confidence": 0.9, "key": "Merchant"},
+            ],
+            "NeedsReview": False, "Notes": "", "Error": False,
+        },
+        {
+            "File": "broken.pdf", "Type": None, "Fields": [],
+            "NeedsReview": False, "Notes": "Could not be read.", "Error": True,
+        },
+    ]
+
+
+def test_write_excel_produces_a_records_and_legend_sheet(tmp_path):
+    out = tmp_path / "report.xlsx"
+    write_excel(_sample_rows(), str(out), confidence_threshold=0.70)
+    wb = load_workbook(str(out))
+    assert wb.sheetnames == ["Records", "About this report"]
+
+
+def test_write_excel_money_like_values_become_real_numbers(tmp_path):
+    out = tmp_path / "report.xlsx"
+    write_excel(_sample_rows(), str(out), confidence_threshold=0.70)
+    ws = load_workbook(str(out))["Records"]
+    # Row 6 = first data row (rows 1-4 are the title band, row 5 is headers).
+    # Field 3 / Value 3 = Total Amount Due, at columns 7/8.
+    assert ws.cell(row=6, column=8).value == 1339.20
+    assert ws.cell(row=6, column=8).number_format == "$#,##0.00"
+
+
+def test_write_excel_flags_low_confidence_and_missing_values_with_a_note(tmp_path):
+    out = tmp_path / "report.xlsx"
+    write_excel(_sample_rows(), str(out), confidence_threshold=0.70)
+    ws = load_workbook(str(out))["Records"]
+    # Field 2 / Value 2 = Transaction Date (confidence 0.4, below threshold), columns 5/6.
+    low_conf_cell = ws.cell(row=6, column=6)
+    assert low_conf_cell.comment is not None
+    assert "confident" in low_conf_cell.comment.text
+    # Field 4 / Value 4 = Tax (missing), columns 9/10.
+    missing_cell = ws.cell(row=6, column=10)
+    assert missing_cell.comment is not None
+    assert "could not be found" in missing_cell.comment.text
+
+
+def test_write_excel_verify_column_reflects_row_state(tmp_path):
+    out = tmp_path / "report.xlsx"
+    write_excel(_sample_rows(), str(out), confidence_threshold=0.70)
+    ws = load_workbook(str(out))["Records"]
+    assert ws.cell(row=6, column=11).value == "Please double-check"  # needs review
+    assert ws.cell(row=7, column=11).value == "Looks good"           # clean
+    assert ws.cell(row=8, column=11).value == "Could not scan"       # error, not "Looks good"
+
+
+def test_write_excel_error_row_is_not_falsely_marked_looks_good(tmp_path):
+    """A document that failed to scan must never claim to look good, even
+    though NeedsReview defaults to False for it same as a clean row."""
+    out = tmp_path / "report.xlsx"
+    write_excel(_sample_rows(), str(out), confidence_threshold=0.70)
+    ws = load_workbook(str(out))["Records"]
+    assert ws.cell(row=8, column=11).value != "Looks good"
+
+
+def test_write_excel_columns_are_auto_sized_within_bounds(tmp_path):
+    out = tmp_path / "report.xlsx"
+    write_excel(_sample_rows(), str(out), confidence_threshold=0.70)
+    ws = load_workbook(str(out))["Records"]
+    for letter, dim in ws.column_dimensions.items():
+        if dim.width is not None:
+            assert 10 <= dim.width <= 46
+
+
+def test_write_excel_no_em_dashes_or_curly_quotes_anywhere(tmp_path):
+    out = tmp_path / "report.xlsx"
+    write_excel(_sample_rows(), str(out), confidence_threshold=0.70)
+    wb = load_workbook(str(out))
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str):
+                    assert "—" not in cell.value
+                if cell.comment:
+                    assert "—" not in cell.comment.text
