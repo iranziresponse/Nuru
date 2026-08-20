@@ -39,6 +39,7 @@ def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp, "_STATE_PATH", str(cache_dir / "pending_state.json"))
     monkeypatch.setattr(webapp, "_PENDING", {})
     monkeypatch.setattr(webapp.audit, "AUDIT_LOG_PATH", str(cache_dir / "audit.log"))
+    monkeypatch.setattr(webapp.ledger, "LEDGER_DB_PATH", str(cache_dir / "ledger.db"))
     monkeypatch.delenv("NURU_ACCESS_PASSWORD", raising=False)
     yield
 
@@ -51,7 +52,7 @@ def client():
     about tripping a shared rate-limit bucket across the whole test run."""
     webapp.app.config["TESTING"] = True
     webapp.app.config["WTF_CSRF_ENABLED"] = False
-    webapp.app.config["RATELIMIT_ENABLED"] = False
+    webapp.limiter.enabled = False
     return webapp.app.test_client()
 
 
@@ -267,7 +268,7 @@ def test_csrf_protection_blocks_a_tokenless_post():
     fixture, which disables CSRF for route-logic tests elsewhere."""
     webapp.app.config["TESTING"] = True
     webapp.app.config["WTF_CSRF_ENABLED"] = True
-    webapp.app.config["RATELIMIT_ENABLED"] = False
+    webapp.limiter.enabled = False
     raw_client = webapp.app.test_client()
     try:
         resp = raw_client.post(
@@ -281,13 +282,134 @@ def test_csrf_protection_blocks_a_tokenless_post():
 
 
 def test_rate_limit_blocks_requests_past_the_cap():
-    """Uses its own client (rate limiting left ON)."""
+    """Uses its own client (rate limiting left ON). Resets the shared
+    in-memory limiter storage afterwards so the real hits this test makes
+    on purpose don't bleed into later tests that expect a clean bucket
+    (flask-limiter's `enabled` flag, unlike the RATELIMIT_ENABLED config
+    key, only gates future checks; it doesn't clear counts already
+    recorded while enabled was True)."""
     webapp.app.config["TESTING"] = True
     webapp.app.config["WTF_CSRF_ENABLED"] = False
-    webapp.app.config["RATELIMIT_ENABLED"] = True
+    webapp.limiter.enabled = True
     raw_client = webapp.app.test_client()
     try:
         statuses = [raw_client.get("/").status_code for _ in range(65)]
         assert 429 in statuses
     finally:
-        webapp.app.config["RATELIMIT_ENABLED"] = False
+        webapp.limiter.enabled = False
+        webapp.limiter.storage.reset()
+
+
+def _scan_one(client, filename="invoice.pdf"):
+    pdf_bytes = _make_pdf_bytes([
+        "Quantum Electronics", "Invoice Date: 2026-04-02",
+        "Total Due: $500.00", "Tax (8%): $40.00",
+    ])
+    client.post("/scan", data={"pdfs": (io.BytesIO(pdf_bytes), filename)},
+                content_type="multipart/form-data")
+    token = next(iter(webapp._PENDING))
+    return token, webapp._PENDING[token]
+
+
+def test_automate_ledger_action_saves_and_purges_pdf(client):
+    token, record = _scan_one(client)
+
+    resp = client.post(f"/automate/{token}", json={
+        "fields": [{"label": "Supplier Name", "value": "Quantum Electronics"},
+                   {"label": "Transaction Date", "value": "2026-04-02"},
+                   {"label": "Total Amount Due", "value": "$500.00"}],
+        "action": "ledger", "param": "Travel",
+    })
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert webapp._PENDING[token]["done"] is True
+    assert not os.path.exists(record["pdf_path"])
+
+    entries, _ = webapp.ledger.list_entries()
+    assert len(entries) == 1
+    assert entries[0]["counterparty"] == "Quantum Electronics"
+    assert entries[0]["amount"] == 500.00
+    assert entries[0]["category"] == "Travel"
+
+
+def test_preview_ledger_shows_recognized_fields_without_saving(client):
+    token, record = _scan_one(client)
+
+    resp = client.post(f"/preview/{token}", json={
+        "fields": [{"label": "Supplier Name", "value": "Quantum Electronics"},
+                   {"label": "Total Amount Due", "value": "$500.00"}],
+        "action": "ledger",
+    })
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert "Quantum Electronics" in body["preview"]
+
+    assert webapp._PENDING[token]["done"] is False
+    assert os.path.exists(record["pdf_path"])
+    entries, _ = webapp.ledger.list_entries()
+    assert entries == []
+
+
+def test_ledger_page_loads_and_shows_saved_entries(client):
+    token, record = _scan_one(client)
+    client.post(f"/automate/{token}", json={
+        "fields": [{"label": "Supplier Name", "value": "Quantum Electronics"},
+                   {"label": "Total Amount Due", "value": "$500.00"}],
+        "action": "ledger", "param": "Utilities",
+    })
+
+    resp = client.get("/ledger")
+    assert resp.status_code == 200
+    assert b"Quantum Electronics" in resp.data
+    assert b"Utilities" in resp.data
+
+
+def test_ledger_page_search_and_filter_params(client):
+    token, record = _scan_one(client)
+    client.post(f"/automate/{token}", json={
+        "fields": [{"label": "Supplier Name", "value": "Quantum Electronics"},
+                   {"label": "Total Amount Due", "value": "$500.00"}],
+        "action": "ledger", "param": "Utilities",
+    })
+
+    match = client.get("/ledger?q=Quantum")
+    assert b"Quantum Electronics" in match.data
+
+    no_match = client.get("/ledger?q=Nonexistent")
+    assert b"Quantum Electronics" not in no_match.data
+
+
+def test_ledger_delete_removes_entry_and_redirects(client):
+    token, record = _scan_one(client)
+    client.post(f"/automate/{token}", json={
+        "fields": [{"label": "Supplier Name", "value": "Quantum Electronics"}],
+        "action": "ledger", "param": "",
+    })
+    entries, _ = webapp.ledger.list_entries()
+    entry_id = entries[0]["id"]
+
+    resp = client.post(f"/ledger/{entry_id}/delete")
+    assert resp.status_code in (302, 303)
+
+    remaining, _ = webapp.ledger.list_entries()
+    assert remaining == []
+
+
+def test_trust_report_loads_and_reflects_real_audit_counts(client):
+    token, record = _scan_one(client)
+    client.post(f"/automate/{token}", json={
+        "fields": [{"label": "Supplier Name", "value": "Quantum Electronics"}],
+        "action": "ledger", "param": "",
+    })
+
+    resp = client.get("/trust-report")
+    assert resp.status_code == 200
+    assert b"1" in resp.data  # at minimum, some count reflecting the one scan/automation
+
+
+def test_header_nav_includes_ledger_link_on_every_page(client):
+    for path in ("/", "/ledger", "/audit"):
+        resp = client.get(path)
+        assert b'href="/ledger"' in resp.data, path

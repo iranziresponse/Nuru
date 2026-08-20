@@ -18,6 +18,7 @@ import json
 import os
 import secrets
 import uuid
+from urllib.parse import urlencode
 
 from flask import Flask, Response, jsonify, redirect, render_template_string, request, send_file
 from flask_limiter import Limiter
@@ -29,6 +30,7 @@ from werkzeug.utils import secure_filename
 import audit
 import automation
 import errors
+import ledger
 from app import (
     DEFAULT_CONFIDENCE_THRESHOLD, VOCAB_PATH, WEIGHTS_PATH,
     process_invoice, write_excel,
@@ -104,6 +106,7 @@ def _get_or_create_secret_key():
 
 app.config["SECRET_KEY"] = _get_or_create_secret_key()
 csrf = CSRFProtect(app)
+app.jinja_env.filters["from_json"] = json.loads
 
 # A few common alternate phrasings per underlying entity, offered as a
 # shortcut in the review grid's label dropdown. The label text field next
@@ -119,6 +122,14 @@ PRESET_LABELS = {
     "Period": ["Statement Period", "Billing Period", "Period"],
     "Balance": ["Closing Balance", "Balance Due", "Balance"],
 }
+
+# Convenience presets for the ledger's category field. Freetext always wins
+# here too, same convention as PRESET_LABELS above.
+LEDGER_CATEGORIES = [
+    "Office Supplies", "Software & Subscriptions", "Travel",
+    "Meals & Entertainment", "Utilities", "Professional Services",
+    "Rent", "Insurance", "Taxes", "Client Reimbursable", "Other",
+]
 
 
 def get_model():
@@ -204,11 +215,15 @@ BASE_STYLE = """
     -webkit-font-smoothing: antialiased;
   }
   .page { max-width: 640px; margin: 0 auto; padding: 56px 24px 40px; min-height: 100vh; }
-  header { display: flex; align-items: center; gap: 10px; margin-bottom: 36px; }
-  .header-link { margin-left: auto; font-size: 0.82rem; color: var(--text-soft); text-decoration: none; }
-  .header-link:hover { color: var(--navy); }
+  header { display: flex; align-items: center; gap: 18px; margin-bottom: 36px; }
+  .logo-link { display: flex; align-items: center; gap: 10px; text-decoration: none; }
   .logo-mark { flex-shrink: 0; }
   .logo-word { font-weight: 800; font-size: 1.2rem; letter-spacing: -0.01em; color: var(--navy); }
+  .nav-links { margin-left: auto; display: flex; gap: 20px; }
+  .nav-link { font-size: 0.85rem; font-weight: 600; color: var(--text-soft); text-decoration: none;
+              padding: 4px 1px; border-bottom: 2px solid transparent; }
+  .nav-link:hover { color: var(--navy); }
+  .nav-link.active { color: var(--navy); border-bottom-color: var(--cyan); }
   h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 8px; }
   .tagline { color: var(--text-soft); font-size: 1rem; line-height: 1.55; margin: 0 0 32px; }
 
@@ -305,6 +320,19 @@ FAVICON = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox
            "%3Cpath d='M50 4 L34 34 L4 50 L34 66 L50 96 Z' fill='%2316205c'/%3E"
            "%3Cpath d='M50 4 L66 34 L96 50 L66 66 L50 96 Z' fill='%2327c6ee'/%3E%3C/svg%3E")
 
+# Shared across every page so there's always a way back to the upload
+# screen and the audit trail, not just the browser's back button.
+HEADER_NAV = """
+  <header>
+    <a class="logo-link" href="/">""" + LOGO_SVG + """<span class="logo-word">Nuru</span></a>
+    <nav class="nav-links">
+      <a class="nav-link{{ ' active' if active == 'upload' else '' }}" href="/">New scan</a>
+      <a class="nav-link{{ ' active' if active == 'ledger' else '' }}" href="/ledger">Ledger</a>
+      <a class="nav-link{{ ' active' if active == 'audit' else '' }}" href="/audit">Audit trail</a>
+    </nav>
+  </header>
+"""
+
 HEAD = f"""
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -324,7 +352,7 @@ UPLOAD_PAGE = """
 </head>
 <body>
 <div class="page">
-  <header>""" + LOGO_SVG + """<span class="logo-word">Nuru</span><a class="header-link" href="/audit">Audit trail</a></header>
+""" + HEADER_NAV + """
   <main>
     <h1>Give Nuru your documents.</h1>
     <p class="tagline">Drop in invoices, receipts, or statements. Nuru reads each one, then lets you review and approve every field before anything leaves the app.</p>
@@ -384,7 +412,7 @@ EXPIRED_PAGE = """
 <head>""" + HEAD + """<title>Nuru</title><style>""" + BASE_STYLE + """</style></head>
 <body>
 <div class="page">
-  <header>""" + LOGO_SVG + """<span class="logo-word">Nuru</span></header>
+""" + HEADER_NAV + """
   <main>
     <h1>This review session is gone.</h1>
     <p class="tagline">It may have already been completed, or it's simply expired. Start again with a fresh upload.</p>
@@ -414,7 +442,7 @@ AUDIT_PAGE = """
 <head>""" + HEAD + """<title>Nuru | Audit trail</title><style>""" + BASE_STYLE + AUDIT_STYLE + """</style></head>
 <body>
 <div class="page">
-  <header>""" + LOGO_SVG + """<span class="logo-word">Nuru</span></header>
+""" + HEADER_NAV + """
   <main>
     <h1>Audit trail</h1>
     <p class="tagline">Every document scanned and every automation run, most recent first. Records metadata only: who, when, where, and whether it succeeded, never the extracted field values themselves.</p>
@@ -451,7 +479,202 @@ AUDIT_PAGE = """
     </div>
   </main>
 
-  <footer><p>Showing the most recent {{ entries|length }} entr{{ "y" if entries|length == 1 else "ies" }}.</p></footer>
+  <footer><p>Showing the most recent {{ entries|length }} entr{{ "y" if entries|length == 1 else "ies" }}. <a href="/trust-report" style="color:inherit;">View the trust &amp; custody report</a>.</p></footer>
+</div>
+</body>
+</html>
+"""
+
+TRUST_STYLE = """
+  .trust-claim { background: var(--cyan-tint); border: 1px solid var(--line); border-radius: 14px;
+                 padding: 20px 22px; font-size: 0.98rem; line-height: 1.6; margin-bottom: 24px; }
+  .trust-section { margin-bottom: 24px; }
+  .trust-section h2 { font-size: 1rem; margin: 0 0 10px; }
+  .trust-stats { display: flex; gap: 28px; flex-wrap: wrap; }
+  .trust-stats .stat-value { font-size: 1.3rem; font-weight: 700; color: var(--navy); display: block; }
+  .trust-stats .stat-label { font-size: 0.78rem; color: var(--text-soft); }
+  .trust-security-list { margin: 0; padding-left: 20px; color: var(--text-soft); font-size: 0.9rem; line-height: 1.7; }
+  .trust-disclaimer { font-size: 0.8rem; color: var(--text-soft); border-top: 1px solid var(--line);
+                       padding-top: 16px; margin-top: 24px; line-height: 1.6; }
+  .trust-meta { color: var(--text-soft); font-size: 0.85rem; margin-bottom: 28px; }
+  @media print {
+    header, .trust-print-btn, footer { display: none !important; }
+    body { background: #fff; }
+    .card { box-shadow: none; border: none; }
+  }
+"""
+
+TRUST_REPORT_PAGE = """
+<!doctype html>
+<html lang="en">
+<head>""" + HEAD + """<title>Nuru | Trust &amp; custody report</title><style>""" + BASE_STYLE + TRUST_STYLE + """</style></head>
+<body>
+<div class="page">
+""" + HEADER_NAV + """
+  <main>
+    <h1>Trust &amp; custody report</h1>
+    <p class="trust-meta">Generated {{ generated_at }} (UTC) &middot; covers this installation's audit log
+      {% if audit_summary.first_entry_at %}from {{ audit_summary.first_entry_at }} to {{ audit_summary.last_entry_at }}{% else %}(no activity recorded yet){% endif %}.</p>
+
+    <div class="trust-claim">
+      Every document processed by this Nuru installation was extracted locally, using a
+      self-hosted, hand-built model (pure NumPy: no PyTorch, no TensorFlow, no pretrained
+      weights). No document content or extracted field value was sent to any third-party AI
+      service, cloud OCR API, or external model as part of extraction. This claim covers
+      extraction only; if a document was later sent to a webhook or email address, that was
+      a destination this installation's user explicitly chose in the Automate step, not
+      something implied by this statement.
+    </div>
+
+    <div class="card trust-section">
+      <h2>Activity summary</h2>
+      <div class="trust-stats">
+        <div><span class="stat-value">{{ audit_summary.total_scanned }}</span><span class="stat-label">documents scanned</span></div>
+        <div><span class="stat-value">{{ audit_summary.total_automated }}</span><span class="stat-label">automations run</span></div>
+        <div><span class="stat-value">{{ ledger_totals.count }}</span><span class="stat-label">entries in the ledger</span></div>
+        <div><span class="stat-value">{{ "$%.2f"|format(ledger_totals.sum_amount) if ledger_totals.sum_amount is not none else "N/A" }}</span><span class="stat-label">recognized ledger total</span></div>
+      </div>
+      {% if audit_summary.by_action %}
+      <p style="color:var(--text-soft); font-size:0.85rem; margin-top:14px; margin-bottom:0;">
+        By action: {% for action, count in audit_summary.by_action.items() %}{{ action }} ({{ count }}){% if not loop.last %}, {% endif %}{% endfor %}
+      </p>
+      {% endif %}
+    </div>
+
+    <div class="card trust-section">
+      <h2>Security posture</h2>
+      <ul class="trust-security-list">
+        <li>Upload size capped per request</li>
+        <li>Webhook destinations checked before sending (link-local, multicast, and reserved ranges always blocked; redirects never followed)</li>
+        <li>Archive destinations restricted to an administrator-approved allowlist</li>
+        <li>CSRF protection on every state-changing request</li>
+        <li>Rate limiting on every route</li>
+        <li>Documents scanned but never carried through review are auto-purged on a bounded schedule</li>
+        <li>The audit log is metadata-only: it records that an action happened and whether it succeeded, never the extracted field values themselves</li>
+      </ul>
+    </div>
+
+    <button type="button" class="btn btn-ghost trust-print-btn" onclick="window.print()">Print / Save as PDF</button>
+
+    <p class="trust-disclaimer">
+      This report is generated from this installation's own local audit trail and reflects this
+      installation only. It is not an independent third-party attestation. See
+      docs/soc2-readiness.md in the Nuru repository for what a formal compliance certification
+      would additionally require.
+    </p>
+  </main>
+</div>
+</body>
+</html>
+"""
+
+LEDGER_STYLE = """
+  .ledger-summary { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 20px; }
+  .ledger-stat .stat-value { font-size: 1.4rem; font-weight: 700; color: var(--navy); display: block; }
+  .ledger-stat .stat-label { font-size: 0.78rem; color: var(--text-soft); }
+  .ledger-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+  .ledger-filters input[type=text], .ledger-filters input[type=date], .ledger-filters select {
+    padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-family: inherit;
+    font-size: 0.85rem; color: var(--text); background: #fff;
+  }
+  .ledger-filters input[type=text] { flex: 1; min-width: 160px; }
+  .ledger-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .ledger-table th { text-align: left; padding: 8px 10px; color: var(--text-soft); font-weight: 600;
+                      border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .ledger-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .ledger-table tr:last-child td { border-bottom: none; }
+  .ledger-amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ledger-empty { color: var(--text-soft); padding: 24px 0; text-align: center; }
+  .ledger-fields-detail summary { cursor: pointer; color: var(--text-soft); font-size: 0.8rem; }
+  .ledger-fields-detail dl { margin: 8px 0 0; font-size: 0.8rem; }
+  .ledger-fields-detail dt { color: var(--text-soft); }
+  .ledger-fields-detail dd { margin: 0 0 6px; }
+  .ledger-delete-btn { background: none; border: none; color: var(--text-soft); cursor: pointer;
+                        font-size: 0.8rem; text-decoration: underline; padding: 0; }
+  .ledger-delete-btn:hover { color: var(--error); }
+  .ledger-more { display: block; text-align: center; margin-top: 16px; color: var(--navy);
+                 font-weight: 600; text-decoration: none; font-size: 0.9rem; }
+"""
+
+LEDGER_PAGE = """
+<!doctype html>
+<html lang="en">
+<head>""" + HEAD + """<title>Nuru | Ledger</title><style>""" + BASE_STYLE + LEDGER_STYLE + """</style></head>
+<body>
+<div class="page">
+""" + HEADER_NAV + """
+  <main>
+    <h1>Ledger</h1>
+    <p class="tagline">Documents you've saved stay here, in this installation's own local database, searchable and totaled. Nothing here is sent anywhere. <a href="/trust-report" style="color:inherit;">View the trust &amp; custody report</a>.</p>
+
+    <div class="ledger-summary">
+      <div class="ledger-stat"><span class="stat-value">{{ totals.count }}</span><span class="stat-label">entries</span></div>
+      <div class="ledger-stat"><span class="stat-value">{{ "$%.2f"|format(totals.sum_amount) if totals.sum_amount is not none else "N/A" }}</span><span class="stat-label">total (recognized amounts)</span></div>
+      {% if totals.unrecognized_amount_count %}
+      <div class="ledger-stat"><span class="stat-value">{{ totals.unrecognized_amount_count }}</span><span class="stat-label">without a recognized amount</span></div>
+      {% endif %}
+    </div>
+
+    <form class="ledger-filters" method="get" action="/ledger">
+      <input type="text" name="q" placeholder="Search filename, counterparty, category" value="{{ q or '' }}">
+      <select name="type">
+        <option value="">All types</option>
+        {% for t in ["Invoice", "Receipt", "Statement"] %}
+        <option value="{{ t }}" {{ "selected" if doc_type == t else "" }}>{{ t }}</option>
+        {% endfor %}
+      </select>
+      <select name="category">
+        <option value="">All categories</option>
+        {% for c in categories %}
+        <option value="{{ c }}" {{ "selected" if category == c else "" }}>{{ c }}</option>
+        {% endfor %}
+      </select>
+      <input type="date" name="from" value="{{ date_from or '' }}">
+      <input type="date" name="to" value="{{ date_to or '' }}">
+      <button type="submit" class="btn btn-ghost btn-small">Filter</button>
+    </form>
+
+    <div class="card">
+      {% if entries %}
+      <div class="table-scroll">
+        <table class="ledger-table">
+          <tr><th>Date</th><th>Document</th><th>Type</th><th>Counterparty</th><th>Category</th><th>Amount</th><th>Fields</th><th></th></tr>
+          {% for e in entries %}
+          <tr>
+            <td>{{ e.document_date or "N/A" }}</td>
+            <td>{{ e.original_filename }}</td>
+            <td>{{ e.doc_type or "N/A" }}</td>
+            <td>{{ e.counterparty or "N/A" }}</td>
+            <td>{{ e.category or "N/A" }}</td>
+            <td class="ledger-amount">{{ e.amount_raw or "N/A" }}</td>
+            <td>
+              <details class="ledger-fields-detail">
+                <summary>{{ e.fields_json|from_json|length }} field(s)</summary>
+                <dl>
+                  {% for f in e.fields_json|from_json %}
+                  <dt>{{ f.label }}</dt><dd>{{ f.value or "Not provided" }}</dd>
+                  {% endfor %}
+                </dl>
+              </details>
+            </td>
+            <td>
+              <form method="post" action="/ledger/{{ e.id }}/delete" onsubmit="return confirm('Delete this ledger entry? This can&#39;t be undone.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="ledger-delete-btn">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </table>
+      </div>
+      {% if has_more %}
+      <a class="ledger-more" href="/ledger?{{ query_string }}&offset={{ offset + entries|length }}">Older entries &rsaquo;</a>
+      {% endif %}
+      {% else %}
+      <p class="ledger-empty">Nothing saved to the ledger yet. Approve a document and choose "Save to ledger" to start one.</p>
+      {% endif %}
+    </div>
+  </main>
 </div>
 </body>
 </html>
@@ -467,8 +690,7 @@ REVIEW_PAGE = """
 </head>
 <body>
 <div class="page">
-  <header>""" + LOGO_SVG + """<span class="logo-word">Nuru</span></header>
-
+""" + HEADER_NAV + """
   <div class="stepper">
     <span class="step active" id="step-pill-review">Review</span>
     <span class="step-arrow">&rsaquo;</span>
@@ -528,6 +750,10 @@ REVIEW_PAGE = """
     <div class="card" id="step-automate" style="display:none;">
       <h1 style="font-size:1.2rem; margin-top:0;">Send this document on</h1>
       <div class="action-grid">
+        <div class="action-card" data-action="ledger">
+          <span class="a-title">Save to ledger</span>
+          <span class="a-sub">Add it to Nuru's built-in bookkeeping record</span>
+        </div>
         <div class="action-card" data-action="webhook">
           <span class="a-title">Send to a webhook</span>
           <span class="a-sub">Zapier, Make, or any endpoint you run</span>
@@ -546,6 +772,13 @@ REVIEW_PAGE = """
         </div>
       </div>
 
+      <div class="action-param" id="param-ledger" style="display:none;">
+        <select id="param-ledger-preset">
+          <option value="">Choose a category…</option>
+          {% for c in ledger_categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select>
+        <input type="text" id="param-ledger-input" placeholder="Category (optional)" value="" style="margin-top:8px;">
+      </div>
       <div class="action-param" id="param-webhook" style="display:none;">
         <input type="text" id="param-webhook-input" placeholder="https://hooks.example.com/..." value="{{ default_webhook_url }}">
       </div>
@@ -637,13 +870,21 @@ REVIEW_PAGE = """
   });
 
   let selectedAction = null;
-  const paramBoxes = { webhook: document.getElementById('param-webhook'),
+  const paramBoxes = { ledger: document.getElementById('param-ledger'),
+                        webhook: document.getElementById('param-webhook'),
                         email: document.getElementById('param-email'),
                         archive: document.getElementById('param-archive'),
                         download: null };
   const runBtn = document.getElementById('run-btn');
   const previewBtn = document.getElementById('preview-btn');
   const previewBox = document.getElementById('preview-box');
+
+  document.getElementById('param-ledger-preset')?.addEventListener('change', function () {
+    if (!this.value) return;
+    document.getElementById('param-ledger-input').value = this.value;
+  });
+
+  const RUN_LABELS = { download: 'Get the spreadsheet', ledger: 'Save to ledger' };
 
   document.querySelectorAll('.action-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -653,7 +894,7 @@ REVIEW_PAGE = """
       Object.values(paramBoxes).forEach(box => { if (box) box.style.display = 'none'; });
       if (paramBoxes[selectedAction]) paramBoxes[selectedAction].style.display = 'block';
       runBtn.disabled = false;
-      runBtn.textContent = selectedAction === 'download' ? 'Get the spreadsheet' : 'Run automation';
+      runBtn.textContent = RUN_LABELS[selectedAction] || 'Run automation';
       previewBtn.disabled = false;
       previewBox.style.display = 'none';
     });
@@ -671,6 +912,7 @@ REVIEW_PAGE = """
   }
 
   function paramFor(action) {
+    if (action === 'ledger') return document.getElementById('param-ledger-input').value.trim();
     if (action === 'webhook') return document.getElementById('param-webhook-input').value.trim();
     if (action === 'email') return document.getElementById('param-email-input').value.trim();
     if (action === 'archive') return document.getElementById('param-archive-input').value.trim();
@@ -835,7 +1077,7 @@ def _handle_unexpected_error(exc):
 
 @app.route("/", methods=["GET"])
 def index():
-    return render_template_string(UPLOAD_PAGE, error=None)
+    return render_template_string(UPLOAD_PAGE, error=None, active="upload")
 
 
 @app.route("/scan", methods=["POST"])
@@ -843,12 +1085,12 @@ def index():
 def scan():
     uploaded_files = [f for f in request.files.getlist("pdfs") if f and f.filename]
     if not uploaded_files:
-        return render_template_string(UPLOAD_PAGE, error="Please choose at least one PDF file.")
+        return render_template_string(UPLOAD_PAGE, error="Please choose at least one PDF file.", active="upload")
 
     try:
         model, vocab = get_model()
     except Exception:
-        return render_template_string(UPLOAD_PAGE, error="Something went wrong on our end. Please try again in a moment.")
+        return render_template_string(UPLOAD_PAGE, error="Something went wrong on our end. Please try again in a moment.", active="upload")
 
     batch_tokens = []
     for uploaded in uploaded_files:
@@ -891,7 +1133,7 @@ def scan():
 def review(token):
     record = _PENDING.get(token)
     if record is None:
-        return render_template_string(EXPIRED_PAGE), 404
+        return render_template_string(EXPIRED_PAGE, active="upload"), 404
     next_token = _next_pending_token(record)
     if record["error"] and not record["done"]:
         # A failed scan has nothing to review or automate; viewing this page
@@ -904,6 +1146,7 @@ def review(token):
         allowed_archive_dirs=automation.allowed_archive_dirs(),
         default_webhook_url=automation.default_webhook_url(),
         default_email_to=automation.default_email_to(),
+        ledger_categories=LEDGER_CATEGORIES,
         next_token=next_token,
     )
 
@@ -933,6 +1176,11 @@ def preview(token):
     rows = _parse_rows(data)
     action = data.get("action")
 
+    if action == "ledger":
+        counterparty = next((r["value"] for r in rows if r["label"] in ledger._COUNTERPARTY_LABELS and r["value"]), None)
+        amount = next((r["value"] for r in rows if r["label"] in ledger._AMOUNT_LABELS and r["value"]), None)
+        summary = f"{counterparty or '(no counterparty recognized)'}: {amount or '(no amount recognized)'}"
+        return jsonify(ok=True, preview=f"Would be saved to the ledger as:\n{summary}\n\nAll {len(rows)} approved field(s) are kept regardless of whether they were recognized above.")
     if action == "webhook":
         payload = {row["label"]: row["value"] for row in rows}
         payload["_document"] = record["original_filename"]
@@ -963,7 +1211,9 @@ def automate(token):
     param = (data.get("param") or "").strip()
 
     download_url = None
-    if action == "webhook":
+    if action == "ledger":
+        ok, message = ledger.save_entry(rows, record, token, category=param)
+    elif action == "webhook":
         payload = {row["label"]: row["value"] for row in rows}
         payload["_document"] = record["original_filename"]
         payload["_type"] = record["type"]
@@ -1025,7 +1275,49 @@ def download(token):
 
 @app.route("/audit", methods=["GET"])
 def audit_trail():
-    return render_template_string(AUDIT_PAGE, entries=audit.read_recent())
+    return render_template_string(AUDIT_PAGE, entries=audit.read_recent(), active="audit")
+
+
+@app.route("/ledger", methods=["GET"])
+def ledger_view():
+    q = request.args.get("q") or None
+    doc_type = request.args.get("type") or None
+    category = request.args.get("category") or None
+    date_from = request.args.get("from") or None
+    date_to = request.args.get("to") or None
+    offset = max(0, int(request.args.get("offset") or 0))
+
+    entries, has_more = ledger.list_entries(
+        q=q, doc_type=doc_type, category=category, date_from=date_from, date_to=date_to, offset=offset,
+    )
+    totals = ledger.get_totals(q=q, doc_type=doc_type, category=category, date_from=date_from, date_to=date_to)
+    query_string = urlencode({k: v for k, v in
+                               [("q", q), ("type", doc_type), ("category", category), ("from", date_from), ("to", date_to)]
+                               if v})
+
+    return render_template_string(
+        LEDGER_PAGE, entries=entries, totals=totals, has_more=has_more, offset=offset,
+        categories=ledger.distinct_categories(), q=q, doc_type=doc_type, category=category,
+        date_from=date_from, date_to=date_to, query_string=query_string, active="ledger",
+    )
+
+
+@app.route("/ledger/<int:entry_id>/delete", methods=["POST"])
+@limiter.limit("30 per minute")
+def ledger_delete(entry_id):
+    ledger.delete_entry(entry_id)
+    return redirect(request.referrer or "/ledger")
+
+
+@app.route("/trust-report", methods=["GET"])
+def trust_report():
+    return render_template_string(
+        TRUST_REPORT_PAGE,
+        audit_summary=audit.summarize(),
+        ledger_totals=ledger.get_totals(),
+        generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        active=None,
+    )
 
 
 @app.route("/healthz", methods=["GET"])

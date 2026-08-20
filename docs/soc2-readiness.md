@@ -46,7 +46,7 @@ choose; that's the real timeline driver, not the audit itself.
 |---|---|
 | Vulnerability management | Partial: dependencies aren't on an automated scanning/patching cadence. |
 | Incident detection | Missing: no error monitoring/alerting; failures currently go to a terminal's stdout. |
-| Backup / recovery | Partial: the trained model and vocabulary are version-controlled; the pending-review state and audit log are not backed up. |
+| Backup / recovery | Partial: the trained model and vocabulary are version-controlled; the pending-review state, audit log, and ledger database are not backed up. |
 | Rate limiting / abuse prevention | Have: Flask-Limiter caps requests per route. |
 | Input validation / injection defense | Have: upload size cap, SSRF guard on webhook destinations, archive-path allowlist, CSRF protection. |
 
@@ -54,7 +54,7 @@ choose; that's the real timeline driver, not the audit itself.
 
 - **Availability**: no uptime commitment or infrastructure redundancy exists yet (single local process). Only pursue this category once there's a real hosting/on-call story.
 - **Processing Integrity**: directly relevant to Nuru's core value prop ("did it extract the data correctly"), but requires a *measured* accuracy benchmark against real documents, which doesn't exist yet (see the readiness audit's accuracy section).
-- **Confidentiality**: the ephemeral-deletion design (source files purged after automation, now with a TTL backstop for abandoned reviews) is a genuine strength here; encryption at rest is the missing piece.
+- **Confidentiality**: the ephemeral-deletion design (source files purged after automation, now with a TTL backstop for abandoned reviews) is a genuine strength here; encryption at rest is the missing piece. The ledger (see README) is a deliberate, user-initiated exception to that ephemerality for extracted field data specifically, not the source PDF, which is still always purged; a Confidentiality-scoped audit would need to treat `.nuru_data/ledger.db` as in-scope data at rest.
 - **Privacy**: needs the actual Privacy Policy finalized (see `legal/`) and a defined data subject rights process before this category is realistic.
 
 ## The realistic sequence

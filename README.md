@@ -7,7 +7,10 @@ every field before anything leaves the app.
 It's built from scratch: the classifier underneath is hand-written NumPy
 (embedding lookup, a context window, a ReLU hidden layer, a softmax
 output, manually-derived backpropagation), no PyTorch, no TensorFlow, no
-pretrained models.
+pretrained models. Because extraction never leaves this machine, Nuru is
+a fit for law firms, healthcare practices, government contractors, and
+other regulated-industry teams that are compliance-blocked from sending
+financial documents to a cloud AI vendor.
 
 ## How it works
 
@@ -21,12 +24,47 @@ pretrained models.
    field is editable: rename it, remove it, or add a custom one.
 3. **Automate**: send the approved data to a webhook (Zapier, Make, or
    your own endpoint), email it, archive the source PDF under a clean
-   name, or just download it as Excel. "Preview what will be sent" shows
-   the exact payload first; no guessing at field names when wiring up a
-   Zap. The source file is permanently deleted from Nuru's cache the
-   moment this step completes. See
-   [docs/integrations.md](docs/integrations.md) for step-by-step
-   Zapier/Make setup.
+   name, save it to Nuru's own built-in ledger (see below), or just
+   download it as Excel. "Preview what will be sent" shows the exact
+   payload first; no guessing at field names when wiring up a Zap. The
+   source file is permanently deleted from Nuru's cache the moment this
+   step completes. See [docs/integrations.md](docs/integrations.md) for
+   step-by-step Zapier/Make setup.
+
+## Ledger
+
+A native, persistent bookkeeping record, separate from the one-shot
+webhook/email/archive/download actions: choosing "Save to ledger" in the
+Automate step writes the approved fields into a local SQLite database
+(`.nuru_data/ledger.db`) and purges the source PDF exactly like every
+other action. Unlike `.nuru_cache/`, this store is never TTL-purged; an
+entry stays until someone explicitly deletes it from the `/ledger`
+screen. `/ledger` is searchable and filterable (document type, category,
+date range, free text) and shows a running total; every saved entry keeps
+its full approved field set, even fields the ledger's summary columns
+don't recognize by label.
+
+V1 is deliberately scoped down: no multi-user accounts/roles, no true
+double-entry accounting or general ledger, no multi-currency conversion,
+no payroll, no inventory, no ML-based auto-categorization (categories are
+a manual dropdown plus freetext), no bank feed reconciliation, and no
+editing a saved entry (delete and re-save from a fresh scan instead). The
+schema does carry a little headroom for a possible future Odoo/ERPNext
+export connector (currency, tax amount, and a couple of reserved columns)
+without any of that integration existing today.
+
+## Trust & custody report
+
+`/trust-report` is a printable page, built entirely from data Nuru
+already logs (the audit trail and the ledger), that documents what
+actually happened: how many documents were scanned, how they were
+automated, and a plain statement that extraction runs locally with no
+third-party AI or cloud OCR call involved. It's meant to be something a
+compliance reviewer can print or save as a PDF and hand to an auditor. It
+deliberately does not claim more than the code actually does: see the
+disclaimer at the bottom of the report itself, and
+[docs/soc2-readiness.md](docs/soc2-readiness.md) for what a formal
+certification would additionally require.
 
 ## Project layout
 
@@ -34,8 +72,9 @@ pretrained models.
 engine/          the from-scratch model: tokenizer.py, model.py
 data/            synthetic training data + the generator that produces it
 app.py           core extraction logic + CLI batch tool
-webapp.py        the browser UI (Scan / Review / Automate)
+webapp.py        the browser UI (Scan / Review / Automate, Ledger, Audit trail, Trust report)
 automation.py    webhook / email / archive backends
+ledger.py        the native SQLite bookkeeping record, see "Ledger" above
 audit.py         who scanned/sent what, when, metadata only, see /audit
 errors.py        structured error logging (+ optional Sentry forwarding)
 train.py         training loop
@@ -45,6 +84,10 @@ tests/           pytest suite
 legal/           DRAFT ToS/Privacy Policy, not legal advice, see legal/README.md
 docs/            reference docs (integrations guide, SOC 2 readiness gap analysis)
 ```
+
+`.nuru_cache/` (ephemeral, TTL-purged) and `.nuru_data/` (the ledger,
+persistent until explicitly deleted) are both created at runtime and
+gitignored.
 
 ## Setup
 
@@ -150,6 +193,10 @@ deployment.
   to work from, not something code alone gets you; most of it is
   organizational process (written policies, a risk assessment cadence,
   an actual audit engagement), not a repo change.
+- **Trust & custody report** (`/trust-report`): see "Trust & custody
+  report" above. Built from the same audit log described in the first
+  bullet, plus the ledger's totals; explicitly not an independent
+  third-party attestation.
 
 ## Tests
 
@@ -235,7 +282,16 @@ or character-level features, not another logic patch.
   (or `brew install tesseract` / `apt install tesseract-ocr`) for
   scanned/photographed documents to work. Without it, those documents get
   a clear "no readable text found" message instead of a crash.
-- **In-memory-plus-a-JSON-file, not a database.** Documents mid-review
-  persist across a restart (`webapp.py`'s `_PENDING` is saved to
-  `.nuru_cache/pending_state.json`), which is enough for local,
-  single-user use. It isn't built for concurrent multi-user traffic.
+- **In-memory-plus-a-JSON-file, not a database, for review state.**
+  Documents mid-review persist across a restart (`webapp.py`'s `_PENDING`
+  is saved to `.nuru_cache/pending_state.json`), which is enough for
+  local, single-user use. It isn't built for concurrent multi-user
+  traffic. (The ledger itself, once a document is saved there, is a real
+  SQLite database; this limitation is about the in-progress review queue
+  only.)
+- **The ledger's summary columns are best-effort.** `amount`,
+  `document_date`, and `counterparty` are populated by matching the
+  approved field labels against known names (Supplier Name/Merchant/
+  Account Name, Total Amount Due/Amount Paid/Closing Balance, etc.). A
+  heavily renamed or custom field won't populate them, though the full
+  approved field set is always preserved and viewable per entry.

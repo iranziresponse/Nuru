@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 archive/
 .nuru_cache/
+.nuru_data/

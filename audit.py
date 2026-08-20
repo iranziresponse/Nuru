@@ -57,3 +57,36 @@ def read_recent(limit=200):
             continue
     entries.reverse()
     return entries
+
+
+def summarize():
+    """Aggregate counts over the full log, not just read_recent()'s capped
+    window: total documents scanned, total automations broken down by
+    action, and the date range the log actually covers. Feeds the trust
+    report, not a person browsing day to day. Never raises; returns
+    zeroed-out values if the log doesn't exist yet."""
+    result = {"total_scanned": 0, "total_automated": 0, "by_action": {},
+              "first_entry_at": None, "last_entry_at": None}
+    if not os.path.exists(AUDIT_LOG_PATH):
+        return result
+    with open(AUDIT_LOG_PATH, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ts = entry.get("timestamp")
+            if ts:
+                result["first_entry_at"] = result["first_entry_at"] or ts
+                result["last_entry_at"] = ts
+            event = entry.get("event")
+            if event == "scanned":
+                result["total_scanned"] += 1
+            elif event == "automated":
+                result["total_automated"] += 1
+                action = entry.get("action", "unknown")
+                result["by_action"][action] = result["by_action"].get(action, 0) + 1
+    return result
