@@ -1270,7 +1270,17 @@ def download(token):
         return "This link has expired.", 404
     record = _PENDING.get(token)
     stem = os.path.splitext(record["original_filename"])[0] if record else "Invoice"
-    return send_file(xlsx_path, as_attachment=True, download_name=f"Nuru - {stem}.xlsx")
+    # A name built only from the source filename repeats every time the same
+    # document is scanned and downloaded again (a very normal thing to do
+    # while testing, or re-running a document). When that happens, the
+    # browser silently appends its own "(1)"/"(2)" to avoid overwriting the
+    # earlier download, and if that earlier file is later moved or deleted,
+    # clicking an old download-history entry for it fails with a
+    # "Windows cannot find" style error that has nothing to do with this
+    # request. Folding in a slice of the (already unique per scan) token
+    # keeps every download's filename distinct, so the browser never needs
+    # to invent that suffix in the first place.
+    return send_file(xlsx_path, as_attachment=True, download_name=f"Nuru - {stem} ({token[:6]}).xlsx")
 
 
 @app.route("/audit", methods=["GET"])
