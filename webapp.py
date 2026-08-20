@@ -389,7 +389,7 @@ UPLOAD_PAGE = """
           <path d="M4 16v2.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V16" stroke="#16205c" stroke-width="1.8" stroke-linecap="round"/>
         </svg>
         <span class="dz-title" id="dz-label">Drop your documents here</span>
-        <span class="dz-sub" id="dz-sub">or click to browse. One or more PDF files</span>
+        <span class="dz-sub" id="dz-sub">or click to browse, or paste with Ctrl+V. One or more PDF files</span>
         <input type="file" id="pdf-input" name="pdfs" accept="application/pdf" multiple required hidden>
       </label>
       <div style="margin-top: 18px;">
@@ -424,6 +424,22 @@ UPLOAD_PAGE = """
     const files = e.dataTransfer.files;
     if (files.length) { input.files = files; showFiles(files); }
   });
+
+  document.addEventListener('paste', e => {
+    const clipboard = e.clipboardData;
+    if (!clipboard || !clipboard.files || !clipboard.files.length) return;
+    const pdfFiles = Array.from(clipboard.items)
+      .filter(item => item.kind === 'file')
+      .map(item => item.getAsFile())
+      .filter(file => file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')));
+    if (!pdfFiles.length) return;
+    e.preventDefault();
+    const transfer = new DataTransfer();
+    pdfFiles.forEach(file => transfer.items.add(file));
+    input.files = transfer.files;
+    showFiles(input.files);
+  });
+
   form.addEventListener('submit', () => { submitBtn.disabled = true; submitBtn.textContent = 'Reading your documents…'; });
 </script>
 </body>
