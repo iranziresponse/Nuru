@@ -16,6 +16,7 @@ Usage:
 import datetime
 import json
 import os
+import re
 import secrets
 import uuid
 from urllib.parse import urlencode
@@ -150,6 +151,29 @@ def _purge_cached_pdf(pdf_path):
             os.remove(pdf_path)
     except OSError as exc:
         _logger.warning(f"could not purge cached PDF {pdf_path}: {exc}")
+
+
+_UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _default_download_filename(record, token):
+    """No extension: callers append .xlsx themselves, since this same base
+    also seeds the editable filename field a user can override before the
+    file is actually requested."""
+    stem = os.path.splitext(record["original_filename"])[0] if record else "Invoice"
+    return f"Nuru - {stem} ({token[:6]})"
+
+
+def _sanitize_download_filename(name, fallback):
+    """A name someone typed by hand needs the same treatment a filesystem
+    or a browser would otherwise apply silently: strip characters that are
+    illegal in a Windows filename, drop a redundant .xlsx they may have
+    typed themselves so it isn't doubled, and fall back rather than ever
+    hand a blank name to send_file."""
+    name = re.sub(r"\.xlsx$", "", (name or "").strip(), flags=re.IGNORECASE)
+    name = _UNSAFE_FILENAME_CHARS.sub("_", name).strip(" .")
+    name = name[:150]
+    return name or fallback
 
 
 def _next_pending_token(record):
@@ -810,6 +834,10 @@ REVIEW_PAGE = """
 
     <div class="card" id="step-result" style="display:none;">
       <p id="result-message" style="font-size:1.05rem; font-weight:600;"></p>
+      <div id="download-filename-group" style="display:none;">
+        <label for="download-filename-input" style="display:block; font-size:0.82rem; color:var(--text-soft); margin-bottom:6px;">File name</label>
+        <input type="text" id="download-filename-input" style="width:100%; margin-bottom:12px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; font-family:inherit; font-size:0.92rem; color:var(--text); background:#fff;">
+      </div>
       <a class="btn btn-primary" id="download-link" style="display:none; text-decoration:none;" href="#">Download the spreadsheet</a>
       <a class="next-link" id="next-link" href="#" style="display:none;">Next document &rsaquo;</a>
       <a class="next-link" id="upload-more-link" href="/" style="display:none;">Upload more documents</a>
@@ -942,7 +970,15 @@ REVIEW_PAGE = """
         document.getElementById('result-message').textContent = data.message;
         if (data.download_url) {
           const dl = document.getElementById('download-link');
-          dl.href = data.download_url;
+          const nameGroup = document.getElementById('download-filename-group');
+          const nameInput = document.getElementById('download-filename-input');
+          nameInput.value = data.download_filename || 'Nuru - Export';
+          const refreshHref = () => {
+            dl.href = data.download_url + '?name=' + encodeURIComponent(nameInput.value.trim());
+          };
+          nameInput.oninput = refreshHref;
+          refreshHref();
+          nameGroup.style.display = 'block';
           dl.style.display = 'inline-flex';
         }
         if (data.next_token) {
@@ -1211,6 +1247,7 @@ def automate(token):
     param = (data.get("param") or "").strip()
 
     download_url = None
+    download_filename = None
     if action == "ledger":
         ok, message = ledger.save_entry(rows, record, token, category=param)
     elif action == "webhook":
@@ -1239,6 +1276,7 @@ def automate(token):
         write_excel([excel_row], xlsx_path)
         ok, message = True, "Ready to download."
         download_url = f"/download/{token}"
+        download_filename = _default_download_filename(record, token)
     elif action == "discard":
         ok, message = True, "Discarded. Nothing was sent anywhere."
     else:
@@ -1256,7 +1294,7 @@ def automate(token):
     )
 
     return jsonify(
-        ok=ok, message=message, download_url=download_url,
+        ok=ok, message=message, download_url=download_url, download_filename=download_filename,
         next_token=_next_pending_token(record) if ok else None,
     )
 
@@ -1269,7 +1307,6 @@ def download(token):
     if not os.path.exists(xlsx_path):
         return "This link has expired.", 404
     record = _PENDING.get(token)
-    stem = os.path.splitext(record["original_filename"])[0] if record else "Invoice"
     # A name built only from the source filename repeats every time the same
     # document is scanned and downloaded again (a very normal thing to do
     # while testing, or re-running a document). When that happens, the
@@ -1278,9 +1315,13 @@ def download(token):
     # clicking an old download-history entry for it fails with a
     # "Windows cannot find" style error that has nothing to do with this
     # request. Folding in a slice of the (already unique per scan) token
-    # keeps every download's filename distinct, so the browser never needs
-    # to invent that suffix in the first place.
-    return send_file(xlsx_path, as_attachment=True, download_name=f"Nuru - {stem} ({token[:6]}).xlsx")
+    # into the default keeps every download's filename distinct on its own;
+    # the ?name= query param lets someone override it outright before the
+    # file is actually requested, from the filename field on the result screen.
+    default_name = _default_download_filename(record, token)
+    requested_name = request.args.get("name")
+    filename_base = _sanitize_download_filename(requested_name, default_name) if requested_name else default_name
+    return send_file(xlsx_path, as_attachment=True, download_name=f"{filename_base}.xlsx")
 
 
 @app.route("/audit", methods=["GET"])

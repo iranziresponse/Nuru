@@ -413,3 +413,65 @@ def test_header_nav_includes_ledger_link_on_every_page(client):
     for path in ("/", "/ledger", "/audit"):
         resp = client.get(path)
         assert b'href="/ledger"' in resp.data, path
+
+
+# ---- editable download filename ---------------------------------------------
+
+def test_sanitize_download_filename_strips_unsafe_characters():
+    assert webapp._sanitize_download_filename('My:Report/Name?.xlsx', 'fallback') == 'My_Report_Name_'
+
+
+def test_sanitize_download_filename_drops_redundant_extension():
+    assert webapp._sanitize_download_filename('Quarterly Report.XLSX', 'fallback') == 'Quarterly Report'
+
+
+def test_sanitize_download_filename_falls_back_when_blank():
+    assert webapp._sanitize_download_filename('   ', 'fallback') == 'fallback'
+    assert webapp._sanitize_download_filename(None, 'fallback') == 'fallback'
+
+
+def test_automate_download_response_includes_a_default_filename(client):
+    token, record = _scan_one(client)
+    resp = client.post(f"/automate/{token}", json={
+        "fields": [{"label": "Supplier Name", "value": "Quantum Electronics"}],
+        "action": "download", "param": "",
+    })
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert body["download_filename"]
+    assert token[:6] in body["download_filename"]
+
+
+def test_download_uses_the_default_filename_when_no_name_given(client):
+    token, record = _scan_one(client)
+    client.post(f"/automate/{token}", json={
+        "fields": [{"label": "Supplier Name", "value": "Quantum Electronics"}],
+        "action": "download", "param": "",
+    })
+    resp = client.get(f"/download/{token}")
+    assert resp.status_code == 200
+    assert f"({token[:6]})" in resp.headers["Content-Disposition"]
+
+
+def test_download_honors_a_custom_name_from_the_query_string(client):
+    token, record = _scan_one(client)
+    client.post(f"/automate/{token}", json={
+        "fields": [{"label": "Supplier Name", "value": "Quantum Electronics"}],
+        "action": "download", "param": "",
+    })
+    resp = client.get(f"/download/{token}", query_string={"name": "My Custom Report Name"})
+    assert resp.status_code == 200
+    assert "My Custom Report Name.xlsx" in resp.headers["Content-Disposition"]
+
+
+def test_download_sanitizes_an_unsafe_custom_name(client):
+    token, record = _scan_one(client)
+    client.post(f"/automate/{token}", json={
+        "fields": [{"label": "Supplier Name", "value": "Quantum Electronics"}],
+        "action": "download", "param": "",
+    })
+    resp = client.get(f"/download/{token}", query_string={"name": "bad:/name?.xlsx"})
+    assert resp.status_code == 200
+    disposition = resp.headers["Content-Disposition"]
+    assert "bad:/name?" not in disposition
+    assert ".xlsx" in disposition
