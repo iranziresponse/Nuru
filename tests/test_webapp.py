@@ -12,6 +12,7 @@ import pytest
 
 pytest.importorskip("reportlab.pdfgen.canvas")
 from reportlab.pdfgen import canvas  # noqa: E402
+from PIL import Image  # noqa: E402
 
 import webapp  # noqa: E402
 
@@ -24,6 +25,13 @@ def _make_pdf_bytes(lines):
         c.drawString(72, y, line)
         y -= 20
     c.save()
+    buf.seek(0)
+    return buf.read()
+
+
+def _make_png_bytes():
+    buf = io.BytesIO()
+    Image.new("RGB", (300, 200), color="white").save(buf, "PNG")
     buf.seek(0)
     return buf.read()
 
@@ -475,3 +483,47 @@ def test_download_sanitizes_an_unsafe_custom_name(client):
     disposition = resp.headers["Content-Disposition"]
     assert "bad:/name?" not in disposition
     assert ".xlsx" in disposition
+
+
+# ---- image upload (paste/drop a photo or screenshot) --------------------------
+
+def test_scan_accepts_a_pasted_or_dropped_image_and_converts_it_to_pdf(client):
+    png_bytes = _make_png_bytes()
+    resp = client.post(
+        "/scan",
+        data={"pdfs": (io.BytesIO(png_bytes), "receipt.png")},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert len(webapp._PENDING) == 1
+    token = next(iter(webapp._PENDING))
+    record = webapp._PENDING[token]
+
+    # The raw uploaded image is never kept once conversion succeeds; only a
+    # converted PDF path is used from here on, even in this test's case
+    # where that PDF then gets purged too because there ends up being
+    # nothing to review (see below).
+    assert not os.path.exists(os.path.join(webapp._RESULTS_DIR, f"{token}_receipt.png"))
+
+    # A blank test image has no text for OCR to find, and this test
+    # environment has no Tesseract installed either way, but that must
+    # surface as the normal "no readable text" outcome, not the
+    # PDF-specific "couldn't be opened" message: that distinction is what
+    # actually proves the conversion and the subsequent pdfplumber.open
+    # both succeeded, rather than everything failing open the same way.
+    assert "valid PDF" not in (record["notes"] or "")
+    assert "readable text" in (record["notes"] or "")
+
+
+def test_scan_degrades_gracefully_for_a_corrupt_image(client):
+    resp = client.post(
+        "/scan",
+        data={"pdfs": (io.BytesIO(b"not a real png"), "broken.png")},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert len(webapp._PENDING) == 1
+    record = next(iter(webapp._PENDING.values()))
+    assert record["error"] is True

@@ -34,7 +34,7 @@ import errors
 import ledger
 from app import (
     DEFAULT_CONFIDENCE_THRESHOLD, VOCAB_PATH, WEIGHTS_PATH,
-    process_invoice, write_excel,
+    image_to_pdf, process_invoice, write_excel,
 )
 from engine.model import TokenClassifier
 from engine.tokenizer import Vocabulary
@@ -123,6 +123,8 @@ PRESET_LABELS = {
     "Period": ["Statement Period", "Billing Period", "Period"],
     "Balance": ["Closing Balance", "Balance Due", "Balance"],
 }
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 # Convenience presets for the ledger's category field. Freetext always wins
 # here too, same convention as PRESET_LABELS above.
@@ -389,8 +391,8 @@ UPLOAD_PAGE = """
           <path d="M4 16v2.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V16" stroke="#16205c" stroke-width="1.8" stroke-linecap="round"/>
         </svg>
         <span class="dz-title" id="dz-label">Drop your documents here</span>
-        <span class="dz-sub" id="dz-sub">or click to browse, or paste with Ctrl+V. One or more PDF files</span>
-        <input type="file" id="pdf-input" name="pdfs" accept="application/pdf" multiple required hidden>
+        <span class="dz-sub" id="dz-sub">or click to browse, or paste with Ctrl+V. PDF, PNG, or JPEG</span>
+        <input type="file" id="pdf-input" name="pdfs" accept="application/pdf,image/png,image/jpeg,image/webp" multiple required hidden>
       </label>
       <div style="margin-top: 18px;">
         <button type="submit" class="btn btn-primary" id="submit-btn">Scan documents</button>
@@ -425,17 +427,29 @@ UPLOAD_PAGE = """
     if (files.length) { input.files = files; showFiles(files); }
   });
 
+  const ACCEPTED_FILE_PATTERN = /\\.(pdf|png|jpe?g|webp)$/i;
+  function isAcceptedFile(file) {
+    if (!file) return false;
+    if (file.type === 'application/pdf' || file.type.startsWith('image/')) return true;
+    return ACCEPTED_FILE_PATTERN.test(file.name || '');
+  }
+
   document.addEventListener('paste', e => {
     const clipboard = e.clipboardData;
     if (!clipboard || !clipboard.files || !clipboard.files.length) return;
-    const pdfFiles = Array.from(clipboard.items)
+    // A screenshot or a copied image (e.g. the Snipping Tool, or "Copy
+    // image" from a browser) lands on the clipboard as an image with no
+    // real filename, same as a copied PDF lands as a file; both are
+    // handled the same way here, then converted server-side if it's an
+    // image rather than a PDF.
+    const acceptedFiles = Array.from(clipboard.items)
       .filter(item => item.kind === 'file')
       .map(item => item.getAsFile())
-      .filter(file => file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')));
-    if (!pdfFiles.length) return;
+      .filter(isAcceptedFile);
+    if (!acceptedFiles.length) return;
     e.preventDefault();
     const transfer = new DataTransfer();
-    pdfFiles.forEach(file => transfer.items.add(file));
+    acceptedFiles.forEach(file => transfer.items.add(file));
     input.files = transfer.files;
     showFiles(input.files);
   });
@@ -1148,8 +1162,27 @@ def scan():
     for uploaded in uploaded_files:
         filename = secure_filename(uploaded.filename)
         token = uuid.uuid4().hex
-        pdf_path = os.path.join(_RESULTS_DIR, f"{token}_{filename}")
-        uploaded.save(pdf_path)
+        raw_path = os.path.join(_RESULTS_DIR, f"{token}_{filename}")
+        uploaded.save(raw_path)
+
+        # A photographed or screenshotted document arrives as a raster image,
+        # not a PDF. Wrapping it in a one-page PDF here means everything
+        # downstream (extraction, the ledger, archive, Excel export) keeps
+        # working with the one artifact shape it already understands, and
+        # the existing OCR fallback in extract_text does the actual reading.
+        pdf_path = raw_path
+        if os.path.splitext(filename)[1].lower() in IMAGE_EXTENSIONS:
+            converted_path = os.path.join(_RESULTS_DIR, f"{token}.pdf")
+            try:
+                image_to_pdf(raw_path, converted_path)
+                pdf_path = converted_path
+            except Exception as exc:
+                errors.report_exception(exc, stage="image_to_pdf", filename=filename)
+                # pdf_path stays as raw_path; process_invoice will fail to
+                # open it below and surface the same friendly message a
+                # corrupt PDF gets, rather than a separate error path here.
+            else:
+                _purge_cached_pdf(raw_path)  # only the converted PDF is needed from here on
 
         result = process_invoice(model, vocab, pdf_path, DEFAULT_CONFIDENCE_THRESHOLD)
         _PENDING[token] = {

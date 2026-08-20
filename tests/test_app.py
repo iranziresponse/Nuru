@@ -1,10 +1,11 @@
 import pytest
 from openpyxl import load_workbook
+from PIL import Image
 
 from app import (
     TYPE_FIELD_CONFIG, VOCAB_PATH, WEIGHTS_PATH,
     _parse_money, _wrapped_row_height,
-    decode_entities, infer_document_type, process_invoice, write_excel,
+    decode_entities, image_to_pdf, infer_document_type, process_invoice, write_excel,
 )
 
 
@@ -286,3 +287,40 @@ def test_write_excel_no_em_dashes_or_curly_quotes_anywhere(tmp_path):
                     assert "—" not in cell.value
                 if cell.comment:
                     assert "—" not in cell.comment.text
+
+
+# ---- image_to_pdf ------------------------------------------------------------
+
+def test_image_to_pdf_wraps_a_png_into_a_one_page_pdf(tmp_path):
+    image_path = tmp_path / "photo.png"
+    Image.new("RGB", (200, 100), color="white").save(image_path)
+    pdf_path = tmp_path / "photo.pdf"
+
+    image_to_pdf(str(image_path), str(pdf_path))
+
+    import pdfplumber
+    with pdfplumber.open(str(pdf_path)) as pdf:
+        assert len(pdf.pages) == 1
+
+
+def test_image_to_pdf_handles_an_alpha_channel_png(tmp_path):
+    """PDF has no alpha channel; an RGBA source (a common screenshot format)
+    must be converted rather than raising or corrupting the output."""
+    image_path = tmp_path / "screenshot.png"
+    Image.new("RGBA", (200, 100), color=(255, 255, 255, 128)).save(image_path)
+    pdf_path = tmp_path / "screenshot.pdf"
+
+    image_to_pdf(str(image_path), str(pdf_path))
+
+    import pdfplumber
+    with pdfplumber.open(str(pdf_path)) as pdf:
+        assert len(pdf.pages) == 1
+
+
+def test_image_to_pdf_raises_on_a_non_image_file(tmp_path):
+    fake_image = tmp_path / "not_really_a_png.png"
+    fake_image.write_bytes(b"this is not image data")
+    pdf_path = tmp_path / "out.pdf"
+
+    with pytest.raises(Exception):
+        image_to_pdf(str(fake_image), str(pdf_path))

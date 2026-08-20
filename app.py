@@ -36,6 +36,7 @@ import re
 import pdfplumber
 from openpyxl import Workbook
 from openpyxl.comments import Comment
+from PIL import Image
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 import errors
@@ -221,6 +222,19 @@ def _ocr_page(page):
     except Exception as exc:
         _logger.warning(f"OCR unavailable or failed: {exc}")
         return ""
+
+
+def image_to_pdf(image_path, pdf_path):
+    """Wraps a single photographed or screenshotted document (PNG/JPEG/WebP)
+    in a one-page PDF, so it can go through the exact same pipeline as any
+    other upload: extract_text's OCR fallback already exists for a PDF page
+    with no text layer, which is exactly what a raw image looks like once
+    it's on a page. Raises on a genuinely corrupt or unreadable image; the
+    caller decides what a conversion failure should look like to the user."""
+    image = Image.open(image_path)
+    if image.mode not in ("RGB", "L"):
+        image = image.convert("RGB")
+    image.save(pdf_path, "PDF")
 
 
 def extract_text(pdf_path):

@@ -1,5 +1,6 @@
 numpy
 pdfplumber
+Pillow
 openpyxl
 flask
 flask-wtf

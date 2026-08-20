@@ -16,8 +16,11 @@ financial documents to a cloud AI vendor.
 
 **Scan → Review → Automate**, each its own screen:
 
-1. **Scan**: upload one or more PDFs. Nuru extracts text (falling back to
-   OCR if a page has no text layer) and classifies each token.
+1. **Scan**: upload one or more PDFs, or a PNG/JPEG/WebP screenshot or
+   photo of a document (drag, click to browse, or paste with Ctrl+V). An
+   image is wrapped into a one-page PDF automatically, then Nuru extracts
+   text (falling back to OCR if a page has no text layer) and classifies
+   each token.
 2. **Review**: Nuru infers what kind of document it is (Invoice, Receipt,
    or Statement) from which fields it actually found, and shows only the
    fields relevant to that kind, labeled in plain business language. Every
