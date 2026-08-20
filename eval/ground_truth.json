@@ -154,5 +154,465 @@
       "Statement Period": "December 2026",
       "Closing Balance": "$1,275.00"
     }
+  },
+  "inv_char_overlap_with_training_subwords.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Ironhaven Fabrication Partners",
+      "Transaction Date": "2026-05-11",
+      "Total Amount Due": "$2,150.70",
+      "Tax Value (VAT/GST)": "$140.70"
+    }
+  },
+  "inv_char_no_training_subword_overlap.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Zylquorth Vantrex Holdings",
+      "Transaction Date": "2026-05-12",
+      "Total Amount Due": "$1,498.00",
+      "Tax Value (VAT/GST)": "$98.00"
+    }
+  },
+  "gen_inv_000.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Fairview Office Supplies",
+      "Transaction Date": "2026-12-27",
+      "Total Amount Due": "$4,933.28",
+      "Tax Value (VAT/GST)": "$365.43"
+    }
+  },
+  "gen_inv_001.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Silver Legal Services",
+      "Transaction Date": "2024-03-17",
+      "Total Amount Due": "$3,380.22",
+      "Tax Value (VAT/GST)": "$221.14"
+    }
+  },
+  "gen_inv_002.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Fairview Architects",
+      "Transaction Date": "2026-01-03",
+      "Total Amount Due": "$6,030.09",
+      "Tax Value (VAT/GST)": "$394.49"
+    }
+  },
+  "gen_inv_003.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Copper Fabrication Co",
+      "Transaction Date": "2025-08-08",
+      "Total Amount Due": "$4,464.44",
+      "Tax Value (VAT/GST)": "$349.75"
+    }
+  },
+  "gen_inv_004.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Aurelia & Okafor Transport",
+      "Transaction Date": "2023-04-08",
+      "Total Amount Due": "$5,117.54",
+      "Tax Value (VAT/GST)": "$357.04"
+    }
+  },
+  "gen_inv_005.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Ivory Labs",
+      "Transaction Date": "2023-04-16",
+      "Total Amount Due": "$6,599.74",
+      "Tax Value (VAT/GST)": "$431.76"
+    }
+  },
+  "gen_inv_006.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Ivory Design Studio",
+      "Transaction Date": "2025-06-21",
+      "Total Amount Due": "$6,393.52",
+      "Tax Value (VAT/GST)": "$361.90"
+    }
+  },
+  "gen_inv_007.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Ashgrove Botanical Supply",
+      "Transaction Date": "2023-05-18",
+      "Total Amount Due": "$6,169.60",
+      "Tax Value (VAT/GST)": "$509.42"
+    }
+  },
+  "gen_inv_008.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Copper Packaging & Sons",
+      "Transaction Date": "2024-05-27",
+      "Total Amount Due": "$2,258.28",
+      "Tax Value (VAT/GST)": "$176.92"
+    }
+  },
+  "gen_inv_009.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Ivory Foodservice",
+      "Transaction Date": "2024-07-03",
+      "Total Amount Due": "$5,846.41",
+      "Tax Value (VAT/GST)": "$407.89"
+    }
+  },
+  "gen_inv_010.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Bramblewood & Corvellis Supply",
+      "Transaction Date": "2024-10-24",
+      "Total Amount Due": "$2,297.80",
+      "Tax Value (VAT/GST)": "$150.32"
+    }
+  },
+  "gen_inv_011.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Windward Furniture",
+      "Transaction Date": "2025-10-05",
+      "Total Amount Due": "$2,258.75",
+      "Tax Value (VAT/GST)": "$157.59"
+    }
+  },
+  "gen_inv_012.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Windward Foodservice Ltd",
+      "Transaction Date": "2026-05-16",
+      "Total Amount Due": "$5,539.81",
+      "Tax Value (VAT/GST)": "$362.42"
+    }
+  },
+  "gen_inv_013.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Granite Design Studio",
+      "Transaction Date": "2025-05-10",
+      "Total Amount Due": "$2,294.34",
+      "Tax Value (VAT/GST)": "$189.44"
+    }
+  },
+  "gen_inv_014.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Fairview Exports Enterprises",
+      "Transaction Date": "2026-09-17",
+      "Total Amount Due": "$4,903.87",
+      "Tax Value (VAT/GST)": "$320.81"
+    }
+  },
+  "gen_inv_015.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Ashgrove Botanical Supply",
+      "Transaction Date": "2024-04-15",
+      "Total Amount Due": "$2,942.13",
+      "Tax Value (VAT/GST)": "$242.93"
+    }
+  },
+  "gen_inv_016.pdf": {
+    "type": "Invoice",
+    "fields": {
+      "Supplier Name": "Moreau & Whitfield Trading",
+      "Transaction Date": "2024-06-17",
+      "Total Amount Due": "$7,701.39",
+      "Tax Value (VAT/GST)": "$435.93"
+    }
+  },
+  "gen_rec_000.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Driftwood Market",
+      "Purchase Date": "2025-11-14",
+      "Amount Paid": "$71.82",
+      "Payment Method": "Mastercard"
+    }
+  },
+  "gen_rec_001.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Birchwood Antiques",
+      "Purchase Date": "2023-12-06",
+      "Amount Paid": "$76.46",
+      "Payment Method": "Visa"
+    }
+  },
+  "gen_rec_002.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Harbor Workshop",
+      "Purchase Date": "2026-10-24",
+      "Amount Paid": "$297.93",
+      "Payment Method": "Visa"
+    }
+  },
+  "gen_rec_003.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "City Garden Center",
+      "Purchase Date": "2026-06-24",
+      "Amount Paid": "$116.32",
+      "Payment Method": "PayPal"
+    }
+  },
+  "gen_rec_004.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Quintanilla & Moreau Deli",
+      "Purchase Date": "2025-08-10",
+      "Amount Paid": "$232.52",
+      "Payment Method": "Debit"
+    }
+  },
+  "gen_rec_005.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Driftwood Outfitters",
+      "Purchase Date": "2023-06-05",
+      "Amount Paid": "$256.18",
+      "Payment Method": "PayPal"
+    }
+  },
+  "gen_rec_006.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Lakeside Diner",
+      "Purchase Date": "2024-10-22",
+      "Amount Paid": "$212.65",
+      "Payment Method": "Cash"
+    }
+  },
+  "gen_rec_007.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Harbor Coffee",
+      "Purchase Date": "2023-01-04",
+      "Amount Paid": "$159.16",
+      "Payment Method": "Amex"
+    }
+  },
+  "gen_rec_008.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Driftwood Surf Shop",
+      "Purchase Date": "2023-02-18",
+      "Amount Paid": "$105.78",
+      "Payment Method": "PayPal"
+    }
+  },
+  "gen_rec_009.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Birchwood Bookshop",
+      "Purchase Date": "2025-02-16",
+      "Amount Paid": "$164.27",
+      "Payment Method": "PayPal"
+    }
+  },
+  "gen_rec_010.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Jarvinen & Bramblewood Tavern",
+      "Purchase Date": "2026-09-24",
+      "Amount Paid": "$81.50",
+      "Payment Method": "Amex"
+    }
+  },
+  "gen_rec_011.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Moreau & Yamamoto Bike Rentals",
+      "Purchase Date": "2024-11-07",
+      "Amount Paid": "$216.73",
+      "Payment Method": "Amex"
+    }
+  },
+  "gen_rec_012.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Aurelia & Quintanilla Surf Shop",
+      "Purchase Date": "2024-12-14",
+      "Amount Paid": "$196.92",
+      "Payment Method": "Debit"
+    }
+  },
+  "gen_rec_013.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Moreau & Aurelia Hardware",
+      "Purchase Date": "2025-02-16",
+      "Amount Paid": "$115.58",
+      "Payment Method": "Mastercard"
+    }
+  },
+  "gen_rec_014.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Birchwood Tea House",
+      "Purchase Date": "2025-05-21",
+      "Amount Paid": "$188.41",
+      "Payment Method": "Amex"
+    }
+  },
+  "gen_rec_015.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "Birchwood Sports",
+      "Purchase Date": "2023-02-21",
+      "Amount Paid": "$275.71",
+      "Payment Method": "PayPal"
+    }
+  },
+  "gen_rec_016.pdf": {
+    "type": "Receipt",
+    "fields": {
+      "Merchant": "City Market",
+      "Purchase Date": "2026-11-14",
+      "Amount Paid": "$224.22",
+      "Payment Method": "Debit"
+    }
+  },
+  "gen_stmt_000.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Samuel Hollow",
+      "Statement Period": "August 2024",
+      "Closing Balance": "$4,666.90"
+    }
+  },
+  "gen_stmt_001.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Zara Moreau",
+      "Statement Period": "March 2023",
+      "Closing Balance": "$1,867.58"
+    }
+  },
+  "gen_stmt_002.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Naomi Ashgrove",
+      "Statement Period": "January 2026",
+      "Closing Balance": "$5,086.60"
+    }
+  },
+  "gen_stmt_003.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Otis Aurelia",
+      "Statement Period": "February 2023",
+      "Closing Balance": "$11,721.23"
+    }
+  },
+  "gen_stmt_004.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Quentin Yamamoto",
+      "Statement Period": "October 2026",
+      "Closing Balance": "$2,342.32"
+    }
+  },
+  "gen_stmt_005.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Priya Aurelia",
+      "Statement Period": "November 2025",
+      "Closing Balance": "$12,879.64"
+    }
+  },
+  "gen_stmt_006.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Fiona Hollow",
+      "Statement Period": "January 2023",
+      "Closing Balance": "$14,638.84"
+    }
+  },
+  "gen_stmt_007.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Naomi Whitfield",
+      "Statement Period": "February 2023",
+      "Closing Balance": "$3,370.69"
+    }
+  },
+  "gen_stmt_008.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Fiona Hollow",
+      "Statement Period": "August 2026",
+      "Closing Balance": "$5,275.55"
+    }
+  },
+  "gen_stmt_009.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Priya Ashgrove",
+      "Statement Period": "January 2023",
+      "Closing Balance": "$5,248.00"
+    }
+  },
+  "gen_stmt_010.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Sofia Jarvinen",
+      "Statement Period": "June 2025",
+      "Closing Balance": "$6,700.87"
+    }
+  },
+  "gen_stmt_011.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Zara Ashgrove",
+      "Statement Period": "October 2023",
+      "Closing Balance": "$1,609.07"
+    }
+  },
+  "gen_stmt_012.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Naomi Jarvinen",
+      "Statement Period": "May 2023",
+      "Closing Balance": "$9,447.80"
+    }
+  },
+  "gen_stmt_013.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Samuel Jarvinen",
+      "Statement Period": "March 2023",
+      "Closing Balance": "$8,602.00"
+    }
+  },
+  "gen_stmt_014.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Viktor Bramblewood-Castlemaine",
+      "Statement Period": "June 2024",
+      "Closing Balance": "$10,337.64"
+    }
+  },
+  "gen_stmt_015.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Otis Moreau",
+      "Statement Period": "March 2024",
+      "Closing Balance": "$3,318.77"
+    }
+  },
+  "gen_stmt_016.pdf": {
+    "type": "Statement",
+    "fields": {
+      "Account Name": "Quentin Hollow",
+      "Statement Period": "August 2025",
+      "Closing Balance": "$8,962.72"
+    }
   }
 }

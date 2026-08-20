@@ -1,4 +1,7 @@
-from engine.tokenizer import Vocabulary, normalize, tokenize
+from engine.tokenizer import (
+    CHAR_BUCKETS, MAX_NGRAMS_PER_TOKEN, Vocabulary,
+    _char_ngrams, _fnv1a, char_ngram_ids, char_ngram_matrix, normalize, tokenize,
+)
 
 
 def test_tokenize_splits_words_dates_and_money():
@@ -39,3 +42,62 @@ def test_vocabulary_unknown_token_maps_to_unk():
     vocab.build([["hello"]])
     unk_id = vocab.word2idx["<UNK>"]
     assert vocab.encode(["totally-unseen-word-xyz"])[0] == unk_id
+
+
+# ---- character n-gram hashing (OOV word representation) ---------------------
+
+def test_fnv1a_is_deterministic_across_calls():
+    assert _fnv1a("brightwater") == _fnv1a("brightwater")
+    assert _fnv1a("brightwater") != _fnv1a("zylophant")
+
+
+def test_char_ngrams_wraps_with_boundary_markers_and_dedupes():
+    ngrams = _char_ngrams("ab")
+    assert ngrams  # even a 2-char word yields at least one 3-gram: "<ab>"
+    assert len(ngrams) == len(set(ngrams))  # deduplicated
+
+
+def test_char_ngrams_caps_at_max_and_keeps_prefix_and_suffix_signal():
+    ngrams = _char_ngrams("internationalconglomerate")
+    assert len(ngrams) <= MAX_NGRAMS_PER_TOKEN
+    # stride-subsampling, not prefix truncation, so the first surviving
+    # n-gram starts at the wrapped word's boundary and the rest aren't
+    # all clustered at the very front of the word.
+    assert ngrams[0].startswith("<")
+
+
+def test_char_ngram_ids_returns_fixed_length_bucket_ids_in_range():
+    ids = char_ngram_ids("Brightwater")
+    assert len(ids) == MAX_NGRAMS_PER_TOKEN
+    for bucket_id in ids:
+        assert 0 <= bucket_id <= CHAR_BUCKETS
+
+
+def test_char_ngram_ids_is_all_pad_for_special_pseudo_tokens():
+    for token in ("2026-08-15", "$1,204.50", "8.5%", "4821"):
+        assert char_ngram_ids(token) == [0] * MAX_NGRAMS_PER_TOKEN
+
+
+def test_char_ngram_ids_is_deterministic_and_case_insensitive():
+    assert char_ngram_ids("Brightwater") == char_ngram_ids("brightwater")
+    assert char_ngram_ids("Brightwater") == char_ngram_ids("Brightwater")
+
+
+def test_char_ngram_ids_shares_buckets_for_similarly_suffixed_unfamiliar_words():
+    """The whole point of the mechanism: two unseen words with real
+    spelling overlap should share at least one hashed bucket, while two
+    unrelated words normally shouldn't."""
+    similar_a = set(char_ngram_ids("Brightwater"))
+    similar_b = set(char_ngram_ids("Brightstone"))
+    unrelated = set(char_ngram_ids("Zylophant"))
+    shared_similar = (similar_a & similar_b) - {0}
+    shared_unrelated = (similar_a & unrelated) - {0}
+    assert shared_similar
+    assert len(shared_similar) >= len(shared_unrelated)
+
+
+def test_char_ngram_matrix_shape_and_empty_input():
+    matrix = char_ngram_matrix(["Acme", "Corp"])
+    assert matrix.shape == (2, MAX_NGRAMS_PER_TOKEN)
+    empty = char_ngram_matrix([])
+    assert empty.shape == (0, MAX_NGRAMS_PER_TOKEN)

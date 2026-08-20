@@ -142,7 +142,17 @@ def test_held_out_evaluation_set_meets_a_regression_floor(model_and_vocab):
     novel names/phrasing absent from training; see eval/generate_eval_set.py)
     through the real evaluation harness. Not a claim about real-world
     accuracy (these are still synthetic documents), just a floor that
-    catches a future change quietly regressing extraction quality."""
+    catches a future change quietly regressing extraction quality.
+
+    Floors were raised from 0.90/0.85 after adding character-level word
+    features (engine/tokenizer.py's hashed n-grams) and a much larger,
+    more varied, combinatorially-generated training set (see
+    data/generate_dataset.py): measured 100% document-type accuracy and
+    ~98% field accuracy (255/261) on a held-out set that also grew from
+    18 to 71 documents in the same change, so this is a real improvement
+    on a harder test, not a floor lowered to fit a worse result. Floors
+    below leave headroom under the measured numbers rather than pinning
+    to them exactly."""
     import json
     import os
 
@@ -167,8 +177,34 @@ def test_held_out_evaluation_set_meets_a_regression_floor(model_and_vocab):
             type_matches += 1
 
     summary = summarize(all_results, type_matches, len(ground_truth))
-    assert summary["document_type_accuracy"] >= 0.90
-    assert summary["field_accuracy"] >= 0.85
+    assert summary["document_type_accuracy"] >= 0.98
+    assert summary["field_accuracy"] >= 0.95
+
+
+def test_unfamiliar_multi_word_vendor_name_is_tagged_correctly_end_to_end(tmp_path, model_and_vocab):
+    """Reproduces the exact failure mode the README's 'Known gap' paragraph
+    named as the reason character-level features were added: an
+    unfamiliar multi-word name whose first token previously got the wrong
+    BIO tag (or whose later tokens got dropped) because the model had no
+    lexical signal for a word it had never seen. This is a durable,
+    human-readable check for that specific case, independent of the
+    aggregate accuracy number above."""
+    pytest.importorskip("reportlab.pdfgen.canvas")
+    from reportlab.pdfgen import canvas
+
+    model, vocab = model_and_vocab
+    pdf_path = tmp_path / "unfamiliar_vendor.pdf"
+    c = canvas.Canvas(str(pdf_path))
+    c.drawString(72, 750, "Thornquist Halloway Freight Partners")
+    c.drawString(72, 730, "Invoice Date: 2026-03-10")
+    c.drawString(72, 710, "Tax (7%): $84.00")
+    c.drawString(72, 690, "Total Due: $1,284.00")
+    c.save()
+
+    result = process_invoice(model, vocab, str(pdf_path), 0.70)
+    assert result["Error"] is False
+    fields_by_label = {f["label"]: f["value"] for f in result["Fields"]}
+    assert fields_by_label.get("Supplier Name") == "Thornquist Halloway Freight Partners"
 
 
 # ---- write_excel ------------------------------------------------------------

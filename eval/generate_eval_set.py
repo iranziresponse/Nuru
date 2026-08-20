@@ -5,6 +5,16 @@ templates. This is still synthetic, so it cannot substitute for real-world
 invoices, but it's a genuine generalization test rather than the model
 grading its own homework on data shaped exactly like what it trained on.
 
+Two kinds of cases live in this file:
+  - CASES: 20 hand-authored documents, including deliberate structural
+    stress tests (reversed field order, minimal documents, two cases
+    built specifically to probe character-level subword generalization).
+  - _generated_cases(): documents built the same combinatorial way
+    data/generate_dataset.py builds training documents, but drawing only
+    from each pool's *_EVAL half (data/generate_dataset.py's fixed,
+    seeded 85/15 split), so "never seen in training" is a structural
+    guarantee of the split rather than something to remember by hand.
+
 Run once to (re)generate eval/documents/*.pdf and eval/ground_truth.json.
 Both are checked into the repo so `evaluate.py` runs reproducibly without
 needing this script re-run.
@@ -12,12 +22,24 @@ needing this script re-run.
 
 import json
 import os
+import sys
 
+import numpy as np
 from reportlab.pdfgen import canvas
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from data.generate_dataset import (
+    BUSINESS_NOUNS_EVAL, DESCRIPTOR_WORDS_EVAL, FIRST_NAMES_EVAL, LAST_NAMES_EVAL,
+    MERCHANT_DESCRIPTORS_EVAL, MERCHANT_NOUNS_EVAL, PAYMENT_METHODS, VENDOR_SUFFIXES_EVAL,
+    generate_account_holder_name, generate_merchant_name, generate_vendor_name,
+)
 
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 DOCS_DIR = os.path.join(EVAL_DIR, "documents")
 GROUND_TRUTH_PATH = os.path.join(EVAL_DIR, "ground_truth.json")
+
+_GEN_SEED = 99  # independent of data/generate_dataset.py's RNG_SEED and the *_TRAIN/*_EVAL split seed
 
 
 def _make_pdf(filename, lines):
@@ -30,10 +52,9 @@ def _make_pdf(filename, lines):
     c.save()
 
 
-# Every name and phrasing choice below is deliberately absent from
-# data/generate_dataset.py's VENDORS/MERCHANTS/ACCOUNT_HOLDERS lists and
-# phrasing-variant lists, so this measures generalization, not recall of
-# the training distribution.
+# Every name below is deliberately absent from data/generate_dataset.py's
+# training-side (*_TRAIN) name pools, so this measures generalization, not
+# recall of the training distribution.
 CASES = [
     # --- Invoices: varied header/date/total phrasing, unseen vendor names ---
     # inv_01 deliberately puts Total before Tax, the reverse of every
@@ -243,20 +264,137 @@ CASES = [
         "Statement Period": "December 2026",
         "Closing Balance": "$1,275.00",
     }),
+
+    # --- Char-feature stress tests: two OOV vendor names, one that shares
+    # spelling with a training-vocabulary word (subword overlap should
+    # help), one that shares nothing (the pure-lexical floor). Neither
+    # "Ironhaven"/"Zylquorth" is a literal training name; "Iron"/"Ironwood"
+    # are real entries in data/generate_dataset.py's training-side
+    # descriptor pool, so the first case has genuine, checkable overlap. ---
+    ("inv_char_overlap_with_training_subwords.pdf", [
+        "Ironhaven Fabrication Partners",
+        "Invoice Date: 2026-05-11",
+        "Tax (7%): $140.70",
+        "Total Due: $2,150.70",
+    ], "Invoice", {
+        "Supplier Name": "Ironhaven Fabrication Partners",
+        "Transaction Date": "2026-05-11",
+        "Total Amount Due": "$2,150.70",
+        "Tax Value (VAT/GST)": "$140.70",
+    }),
+    ("inv_char_no_training_subword_overlap.pdf", [
+        "Zylquorth Vantrex Holdings",
+        "Invoice Date: 2026-05-12",
+        "Tax (7%): $98.00",
+        "Total Due: $1,498.00",
+    ], "Invoice", {
+        "Supplier Name": "Zylquorth Vantrex Holdings",
+        "Transaction Date": "2026-05-12",
+        "Total Amount Due": "$1,498.00",
+        "Tax Value (VAT/GST)": "$98.00",
+    }),
 ]
+
+
+def _pick(rng, options):
+    return options[int(rng.integers(0, len(options)))]
+
+
+def _eval_date(rng):
+    return f"{int(rng.integers(2023, 2027)):04d}-{int(rng.integers(1, 13)):02d}-{int(rng.integers(1, 28)):02d}"
+
+
+_MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
+
+def _generate_invoice_case(rng, index):
+    vendor = generate_vendor_name(rng, descriptors=DESCRIPTOR_WORDS_EVAL, nouns=BUSINESS_NOUNS_EVAL,
+                                   suffixes=VENDOR_SUFFIXES_EVAL, last_names=LAST_NAMES_EVAL)
+    date = _eval_date(rng)
+    subtotal = rng.uniform(50, 8000)
+    tax_rate = rng.choice([5, 6, 7, 7.5, 8, 8.5, 9, 10])
+    tax_amount = subtotal * tax_rate / 100
+    total = subtotal + tax_amount
+
+    header = _pick(rng, ["{vendor}", "Vendor: {vendor}", "From: {vendor}", "Billed By: {vendor}", "Supplier: {vendor}"])
+    lines = [
+        header.format(vendor=vendor),
+        f"{_pick(rng, ['Invoice Date:', 'Date:', 'Issued:', 'Bill Date:'])} {date}",
+        f"{_pick(rng, ['Tax ({r}%):', 'VAT ({r}%):', 'Sales Tax ({r}%):']).format(r=tax_rate)} ${tax_amount:,.2f}",
+        f"{_pick(rng, ['Total Due:', 'Total:', 'Amount Due:', 'Grand Total:'])} ${total:,.2f}",
+    ]
+    fields = {
+        "Supplier Name": vendor, "Transaction Date": date,
+        "Total Amount Due": f"${total:,.2f}", "Tax Value (VAT/GST)": f"${tax_amount:,.2f}",
+    }
+    return f"gen_inv_{index:03d}.pdf", lines, "Invoice", fields
+
+
+def _generate_receipt_case(rng, index):
+    merchant = generate_merchant_name(rng, descriptors=MERCHANT_DESCRIPTORS_EVAL, nouns=MERCHANT_NOUNS_EVAL,
+                                       last_names=LAST_NAMES_EVAL)
+    date = _eval_date(rng)
+    amount = rng.uniform(5, 300)
+    method = _pick(rng, PAYMENT_METHODS)
+
+    header = _pick(rng, ["{merchant}", "Merchant: {merchant}", "Sold By: {merchant}", "Store: {merchant}"])
+    lines = [
+        header.format(merchant=merchant),
+        f"{_pick(rng, ['Purchase Date:', 'Date:', 'Transaction Date:'])} {date}",
+        f"{_pick(rng, ['Amount Paid:', 'Total:', 'Amount:'])} ${amount:,.2f}",
+        f"{_pick(rng, ['Payment Method:', 'Paid via:', 'Tender:'])} {method}",
+    ]
+    fields = {
+        "Merchant": merchant, "Purchase Date": date,
+        "Amount Paid": f"${amount:,.2f}", "Payment Method": method,
+    }
+    return f"gen_rec_{index:03d}.pdf", lines, "Receipt", fields
+
+
+def _generate_statement_case(rng, index):
+    holder = generate_account_holder_name(rng, first_names=FIRST_NAMES_EVAL, last_names=LAST_NAMES_EVAL)
+    period = f"{_pick(rng, _MONTH_NAMES)} {int(rng.integers(2023, 2027))}"
+    balance = rng.uniform(200, 15000)
+
+    header = _pick(rng, ["{holder}", "Account Holder: {holder}", "Prepared For: {holder}", "Statement For: {holder}"])
+    lines = [
+        header.format(holder=holder),
+        f"{_pick(rng, ['Statement Period:', 'Billing Period:', 'Period:'])} {period}",
+        f"{_pick(rng, ['Closing Balance:', 'Ending Balance:', 'Balance:'])} ${balance:,.2f}",
+    ]
+    fields = {"Account Name": holder, "Statement Period": period, "Closing Balance": f"${balance:,.2f}"}
+    return f"gen_stmt_{index:03d}.pdf", lines, "Statement", fields
+
+
+def _generated_cases(count_per_type=17):
+    rng = np.random.default_rng(_GEN_SEED)
+    cases = []
+    for i in range(count_per_type):
+        cases.append(_generate_invoice_case(rng, i))
+    for i in range(count_per_type):
+        cases.append(_generate_receipt_case(rng, i))
+    for i in range(count_per_type):
+        cases.append(_generate_statement_case(rng, i))
+    return cases
+
+
+ALL_CASES = CASES + _generated_cases()
 
 
 def main():
     os.makedirs(DOCS_DIR, exist_ok=True)
     ground_truth = {}
-    for filename, lines, doc_type, fields in CASES:
+    for filename, lines, doc_type, fields in ALL_CASES:
         _make_pdf(filename, lines)
         ground_truth[filename] = {"type": doc_type, "fields": fields}
 
     with open(GROUND_TRUTH_PATH, "w", encoding="utf-8") as f:
         json.dump(ground_truth, f, indent=2)
 
-    print(f"Wrote {len(CASES)} evaluation documents to {DOCS_DIR}")
+    print(f"Wrote {len(ALL_CASES)} evaluation documents to {DOCS_DIR}")
     print(f"Wrote ground truth to {GROUND_TRUTH_PATH}")
 
 

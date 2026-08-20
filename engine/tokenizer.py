@@ -7,6 +7,8 @@ and the vocabulary is a plain Python dict mapping token -> integer id.
 import json
 import re
 
+import numpy as np
+
 PAD_TOKEN = "<PAD>"
 UNK_TOKEN = "<UNK>"
 
@@ -62,6 +64,86 @@ def normalize(token):
     if _NUM_RE.match(token):
         return "<NUM>"
     return token.lower()
+
+
+_SPECIAL_TOKENS = {"<DATE>", "<MONEY>", "<PERCENT>", "<NUM>"}
+
+# A word-level vocabulary alone collapses every unfamiliar name to the same
+# <UNK> id, giving the classifier no way to tell "Brightwater Consulting"
+# from "Zylophant Nonsense": both look identical once encoded. Hashed
+# character n-grams give every word, seen or not, a representation built
+# from its spelling (capitalization patterns, suffixes like "Inc"/"Corp",
+# name-ish endings), which is exactly the signal an OOV vendor/merchant
+# name still carries even though its exact spelling was never in training.
+# This is fastText's *hashing trick*: buckets are trained from scratch
+# (Xavier-init in engine/model.py, same as the word embeddings), nothing
+# pretrained is involved.
+NGRAM_SIZES = (3, 4)
+CHAR_BUCKETS = 4000          # bucket 0 is reserved for padding
+CHAR_VOCAB_SIZE = CHAR_BUCKETS + 1
+MAX_NGRAMS_PER_TOKEN = 8
+
+
+def _fnv1a(s):
+    """32-bit FNV-1a. Deliberately not Python's builtin hash(): that's
+    randomized per-process (PYTHONHASHSEED) unless explicitly disabled,
+    which would make a saved weights.npz checkpoint's char-bucket mapping
+    different on every machine and every restart."""
+    h = 2166136261
+    for ch in s:
+        h ^= ord(ch)
+        h = (h * 16777619) & 0xFFFFFFFF
+    return h
+
+
+def _char_ngrams(word):
+    """Character n-grams of a word, wrapped with boundary markers so a
+    prefix/suffix n-gram is distinguishable from the same substring
+    appearing mid-word (e.g. the leading "Con" of "Consulting" vs. a
+    mid-word "con"). Deduplicated preserving first-occurrence order; if
+    more than MAX_NGRAMS_PER_TOKEN survive, stride-subsampled across the
+    full list rather than truncated to a prefix, so a long word's suffix
+    (often the most distinctive part, e.g. "-berg", "-son", "LLC") still
+    contributes instead of only ever seeing its first few characters."""
+    wrapped = f"<{word.lower()}>"
+    seen = []
+    seen_set = set()
+    for n in NGRAM_SIZES:
+        if len(wrapped) < n:
+            continue
+        for i in range(len(wrapped) - n + 1):
+            ngram = wrapped[i:i + n]
+            if ngram not in seen_set:
+                seen_set.add(ngram)
+                seen.append(ngram)
+    if len(seen) > MAX_NGRAMS_PER_TOKEN:
+        stride = max(1, len(seen) // MAX_NGRAMS_PER_TOKEN)
+        seen = seen[::stride][:MAX_NGRAMS_PER_TOKEN]
+    return seen
+
+
+def char_ngram_ids(token):
+    """MAX_NGRAMS_PER_TOKEN hashed bucket ids for one raw token, zero
+    (pad) filled past however many n-grams it actually has. The <DATE>/
+    <MONEY>/<PERCENT>/<NUM> pseudo-tokens get an all-pad vector: their
+    literal digit text carries no reusable subword signal and would just
+    add hash noise across otherwise-unrelated amounts and dates. Every
+    ordinary word gets real char features, including one that will still
+    map to <UNK> at the word level, since that's exactly the case this
+    exists to help."""
+    ids = [0] * MAX_NGRAMS_PER_TOKEN
+    if normalize(token) in _SPECIAL_TOKENS:
+        return ids
+    for i, ngram in enumerate(_char_ngrams(token)):
+        ids[i] = 1 + (_fnv1a(ngram) % CHAR_BUCKETS)
+    return ids
+
+
+def char_ngram_matrix(tokens):
+    """(len(tokens), MAX_NGRAMS_PER_TOKEN) int array, one row per token."""
+    if not tokens:
+        return np.zeros((0, MAX_NGRAMS_PER_TOKEN), dtype=np.int64)
+    return np.array([char_ngram_ids(tok) for tok in tokens], dtype=np.int64)
 
 
 class Vocabulary:

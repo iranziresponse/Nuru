@@ -40,8 +40,8 @@ from PIL import Image
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 import errors
-from engine.model import ID2LABEL, TokenClassifier, build_context_windows
-from engine.tokenizer import Vocabulary, tokenize
+from engine.model import ID2LABEL, TokenClassifier, build_char_context_windows, build_context_windows
+from engine.tokenizer import Vocabulary, char_ngram_matrix, tokenize
 
 _logger = errors.get_logger()
 
@@ -351,7 +351,9 @@ def process_invoice(model, vocab, pdf_path, confidence_threshold=DEFAULT_CONFIDE
     try:
         ids = vocab.encode(tokens)
         window_ids = build_context_windows(ids, model.window)
-        pred_ids, confidences = model.predict_with_confidence(window_ids)
+        char_matrix = char_ngram_matrix(tokens)
+        window_char_ids = build_char_context_windows(char_matrix, model.window)
+        pred_ids, confidences = model.predict_with_confidence(window_ids, window_char_ids)
         pred_labels = [ID2LABEL[i] for i in pred_ids]
         entity_values, entity_confs = decode_entities(tokens, pred_labels, confidences)
     except Exception as exc:

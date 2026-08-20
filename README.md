@@ -223,30 +223,46 @@ python evaluate.py
 `evaluate.py` measures per-field accuracy, document-type accuracy, and
 whether the confidence flag is actually informative (does a wrong answer
 get flagged more often than a right one), against `eval/documents/`, a
-fixed, held-out set of synthetic PDFs whose vendor/merchant/account names
-and phrasing are deliberately absent from `data/generate_dataset.py`'s
-training templates, so it measures generalization rather than the model
-grading its own homework.
+held-out set of synthetic PDFs (20 hand-authored structural stress tests
+plus 51 generated the same combinatorial way training documents are)
+whose vendor/merchant/account names and phrasing are deliberately absent
+from `data/generate_dataset.py`'s training pools, so it measures
+generalization rather than the model grading its own homework.
 
-**Current numbers on that set: 100% document-type accuracy, 94% field
-accuracy (62/66).** This is **not a real-world accuracy claim**; every
+**Current numbers on that set: 100% document-type accuracy, 98% field
+accuracy (255/261).** This is **not a real-world accuracy claim**; every
 document in `eval/documents/` is still synthetic, and no benchmark against
 actual invoices from actual vendors exists. Point `evaluate.py --documents
 <dir> --ground-truth <file>` at real documents (same JSON shape as
 `eval/ground_truth.json`) the moment any exist.
 
-The remaining known gap, found by running this harness rather than
-assumed: a multi-word name (vendor or merchant) with an unfamiliar middle
-word occasionally gets tagged with the wrong entity *kind* on its first
-token even when later words in the same span are tagged correctly. The
-model has no lexical signal for a word it's never seen, only local
-context, and that context is sometimes ambiguous between "this starts a
-company name" and "this starts a store name." The mismatched tag causes
-`decode_entities` to drop or truncate the span rather than guess. A
-document-level type-inference fix (checking structurally-unambiguous
-fields like Tax before ever trusting an entity-name guess) closed most of
-this; what's left needs either a larger/more varied training vocabulary
-or character-level features, not another logic patch.
+**How the model stays capable without any pretrained weights**:
+`engine/tokenizer.py` gives every word, including one it's never seen, a
+representation built from hashed character n-grams of its own spelling
+(fastText's *hashing trick*, trained from scratch, nothing pretrained),
+concatenated with its word embedding in `engine/model.py`. This directly
+targets the failure mode this project found by running the eval harness
+rather than assuming: an unfamiliar multi-word name (vendor or merchant)
+could get tagged with the wrong entity *kind*, or have its later words
+dropped, because the model had no lexical signal for a word it had never
+seen. `data/generate_dataset.py` also grew from ~45 hand-typed vendor
+names to combinatorially generated ones (name-fragment pools split
+85/15 so training and eval structurally never share an identifying name
+fragment) with far more phrasing variety and realistic non-entity
+content (addresses, item lines, terms boilerplate) spliced in at
+randomized positions, so entities are learned embedded in surrounding
+text rather than always in the same relative spot.
+
+The remaining known gap: a long (3-4 word) span, especially an
+ampersand-style firm name ("Jarvinen & Bramblewood Tavern"), still
+occasionally loses its last word or gets dropped entirely. The model
+only ever sees a fixed 5-token local window (2 tokens either side); a
+span running the full length of that window has little room left to
+confirm it should keep tagging. Widening the window, or moving past a
+fixed-window feed-forward tagger to something with real sequence memory,
+would target this directly, but was deliberately deferred rather than
+bundled into the same change as the character-feature/data work above,
+to keep each change's effect on accuracy separately measurable.
 
 ## Operations
 
