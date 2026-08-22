@@ -83,6 +83,7 @@ errors.py        structured error logging (+ optional Sentry forwarding)
 train.py         training loop
 evaluate.py      accuracy benchmark harness, see "Extraction accuracy" below
 eval/            held-out synthetic evaluation set + the generator that produces it
+eval/real_data/  real-world benchmark (SROIE receipts), see "Real-world benchmark" below
 tests/           pytest suite
 legal/           DRAFT ToS/Privacy Policy, not legal advice, see legal/README.md
 docs/            reference docs (integrations guide, SOC 2 readiness gap analysis)
@@ -231,10 +232,11 @@ generalization rather than the model grading its own homework.
 
 **Current numbers on that set: 100% document-type accuracy, 98% field
 accuracy (255/261).** This is **not a real-world accuracy claim**; every
-document in `eval/documents/` is still synthetic, and no benchmark against
-actual invoices from actual vendors exists. Point `evaluate.py --documents
-<dir> --ground-truth <file>` at real documents (same JSON shape as
-`eval/ground_truth.json`) the moment any exist.
+document in `eval/documents/` is still synthetic. See "Real-world
+benchmark" below for what happens against actual photographed receipts,
+which is a much harder and much more honest number. Point `evaluate.py
+--documents <dir> --ground-truth <file>` at any other real documents
+(same JSON shape as `eval/ground_truth.json`) the moment they exist.
 
 **How the model stays capable without any pretrained weights**:
 `engine/tokenizer.py` gives every word, including one it's never seen, a
@@ -263,6 +265,51 @@ fixed-window feed-forward tagger to something with real sequence memory,
 would target this directly, but was deliberately deferred rather than
 bundled into the same change as the character-feature/data work above,
 to keep each change's effect on accuracy separately measurable.
+
+### Real-world benchmark (receipts)
+
+```
+python eval/real_data/prepare_sroie.py   # downloads a sample, see the script's docstring for attribution
+python evaluate.py --documents eval/real_data/sroie/documents --ground-truth eval/real_data/sroie/ground_truth.json
+```
+
+The one genuine real-world check in this project: 150 real photographed
+Malaysian retail receipts from **SROIE** (ICDAR 2019 Robust Reading
+Challenge on Scanned Receipts OCR and Information Extraction), via the
+MIT-licensed mirror at
+[github.com/zzzDavid/ICDAR-2019-SROIE](https://github.com/zzzDavid/ICDAR-2019-SROIE),
+run through Nuru's real pipeline unmodified (including its actual OCR
+fallback, not SROIE's own text-localization annotations).
+
+**Measured: 34% document-type accuracy, 8% field accuracy (35/450),
+0/150 correct on Merchant specifically.** This is a large, honest drop
+from the 98% synthetic number above, and it should be: training data
+here is entirely synthetic documents with simple, consistent phrasing
+("Merchant: X", "Purchase Date: X"), and SROIE receipts are real,
+all-caps, inconsistently formatted retail receipts with no such labeled
+structure at all, a genuinely different distribution the model has never
+been trained on. This is precisely why "not a real-world accuracy claim"
+has been attached to every synthetic number in this document: now there
+is a real one, and it says extraction on real documents this different
+from training needs real training data (or a different model,
+matching real document structure) to actually work, not just a bigger
+synthetic eval set.
+
+One result inside that gap is a genuine strength, not a footnote: 383 of
+415 wrong answers were still flagged low-confidence ("please
+double-check"), and only 3 of 35 correct answers were wrongly flagged.
+Even badly out of its depth, the model stayed honest about not knowing,
+which is the actual safety property this project's whole review-before-
+send design depends on.
+
+Invoices and statements have no comparable real-world benchmark yet: the
+public options checked (DeepForm for invoice-like documents, Kleister-Charity
+for financial reports) either had no clear data license, required an
+awkward multi-script download from a third-party host, or covered a
+document shape (long charity annual reports) too different from Nuru's
+simple statement schema to be a fair comparison. Downloaded images and
+generated ground truth under `eval/real_data/` are gitignored, not
+committed; re-run the prepare script to reproduce them.
 
 ## Operations
 

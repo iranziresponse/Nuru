@@ -4,3 +4,5 @@ __pycache__/
 archive/
 .nuru_cache/
 .nuru_data/
+eval/real_data/sroie/
+nuru_server*.log
