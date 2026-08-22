@@ -1,0 +1,11 @@
+# PDF files carry meaningful byte offsets internally (the xref table);
+# converting LF<->CRLF on checkout, which Windows git's core.autocrlf
+# does by default for anything it heuristically guesses is text, shifts
+# every one of those offsets and corrupts the file ("Unexpected EOF" on
+# open). PDFs are text-heavy enough in their header/xref/trailer sections
+# to fool that heuristic, so they need an explicit binary declaration;
+# .npz/.xlsx are zip-based and are reliably auto-detected as binary
+# already, but are marked explicitly here too rather than relying on it.
+*.pdf binary
+*.npz binary
+*.xlsx binary
