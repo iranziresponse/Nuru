@@ -5,4 +5,6 @@ archive/
 .nuru_cache/
 .nuru_data/
 eval/real_data/sroie/
+data/real_data/
+data/real_data.csv
 nuru_server*.log

@@ -15,9 +15,16 @@ UNK_TOKEN = "<UNK>"
 # Order matters: more specific patterns (dates, money, percentages) are
 # tried before generic word/number patterns so entities like "2026-08-15"
 # or "$1,204.50" survive as a single token instead of being fragmented.
+# The dash-separated DD-MM-YYYY/DD-MM-YY form (distinct from the ISO
+# YYYY-MM-DD form above it) was added after the real-world SROIE
+# benchmark showed real receipts using it ("19-03-2018", "12-01-19");
+# without it those dates fragmented into separate digit/punctuation
+# tokens and could never be tagged as a single <DATE> entity at all,
+# regardless of how good the classifier itself is.
 _TOKEN_PATTERN = re.compile(
     r"""
     \d{4}-\d{2}-\d{2}                     # ISO date: 2026-08-15
+    |\d{1,2}-\d{1,2}-\d{2,4}              # dash date: 19-03-2018, 12-01-19
     |\d{1,2}/\d{1,2}/\d{2,4}              # US date: 08/15/2026
     |\$\d{1,3}(?:,\d{3})*(?:\.\d{2})?     # money: $1,204.50
     |\d{1,3}(?:,\d{3})*\.\d{2}            # bare decimal amount: 1204.50
@@ -37,7 +44,7 @@ def tokenize(text):
     return _TOKEN_PATTERN.findall(text)
 
 
-_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4})$")
+_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}|\d{1,2}-\d{1,2}-\d{2,4}|\d{1,2}/\d{1,2}/\d{2,4})$")
 _MONEY_RE = re.compile(r"^(\$\d{1,3}(,\d{3})*(\.\d{2})?|\d{1,3}(,\d{3})*\.\d{2})$")
 _PERCENT_RE = re.compile(r"^\d+(\.\d+)?%$")
 _NUM_RE = re.compile(r"^\d+$")

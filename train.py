@@ -88,6 +88,15 @@ def main():
     parser.add_argument("--lr-decay", dest="lr_decay", action="store_true", default=True,
                          help="Linearly decay the learning rate to 10%% of --lr over the run (default on).")
     parser.add_argument("--no-lr-decay", dest="lr_decay", action="store_false")
+    parser.add_argument("--real-data",
+                         default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "real_data.csv"),
+                         help="Optional real, weakly-labeled data (data/prepare_real_training_data.py's "
+                              "output) to blend into training. Silently skipped if the file doesn't exist, "
+                              "so plain synthetic-only training still works with no extra setup.")
+    parser.add_argument("--real-data-repeat", type=int, default=3,
+                         help="How many times to repeat each real document in the training stream, so a "
+                              "small real-data set still carries meaningful weight against a much larger "
+                              "synthetic one instead of being drowned out by it.")
     args = parser.parse_args()
 
     rng = np.random.default_rng(args.seed)
@@ -95,7 +104,15 @@ def main():
     print(f"Loading dataset from {DATA_PATH}")
     docs = load_documents(DATA_PATH)
     train_docs, val_docs = split_train_val(docs, args.val_fraction, rng)
-    print(f"{len(docs)} documents -> {len(train_docs)} train / {len(val_docs)} val")
+    print(f"{len(docs)} synthetic documents -> {len(train_docs)} train / {len(val_docs)} val")
+
+    if os.path.exists(args.real_data):
+        real_docs = load_documents(args.real_data)
+        repeated = real_docs * args.real_data_repeat
+        train_docs = train_docs + repeated
+        print(f"Blended in {len(real_docs)} real document(s) from {args.real_data} "
+              f"(repeated {args.real_data_repeat}x -> {len(repeated)} effective training documents)")
+    print(f"Total training documents: {len(train_docs)}")
 
     vocab = Vocabulary()
     vocab.build([tokens for tokens, _ in train_docs])

@@ -29,6 +29,28 @@ def test_normalize_collapses_open_vocabulary_shapes():
     assert normalize("Invoice") == "invoice"  # ordinary word: lowercased, not collapsed
 
 
+def test_tokenize_and_normalize_handle_dash_separated_dates():
+    """Added after the real-world SROIE benchmark showed real receipts
+    using DD-MM-YYYY and DD-MM-YY with dashes, a format the tokenizer
+    previously only recognized in ISO (YYYY-MM-DD) or US (slash) form,
+    fragmenting anything else into separate digit/punctuation tokens
+    that could never be tagged as a single date entity."""
+    tokens = tokenize("Date 19-03-2018 Cashier")
+    assert "19-03-2018" in tokens
+    assert normalize("19-03-2018") == "<DATE>"
+
+    tokens_short_year = tokenize("Date 12-01-19 Total")
+    assert "12-01-19" in tokens_short_year
+    assert normalize("12-01-19") == "<DATE>"
+
+
+def test_dash_date_does_not_break_iso_date_recognition():
+    """The new dash-date alternative must not shadow or interfere with
+    the existing, more specific ISO pattern."""
+    assert tokenize("2026-08-15") == ["2026-08-15"]
+    assert normalize("2026-08-15") == "<DATE>"
+
+
 def test_vocabulary_build_and_encode_roundtrip():
     vocab = Vocabulary()
     vocab.build([["Total", ":", "$500.00"], ["Vendor", "Acme"]])
